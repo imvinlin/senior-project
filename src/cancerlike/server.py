@@ -15,7 +15,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         METADATA,
         separator="\t",
         infer_schema_length=0,
-        null_values["NA"],
+        null_values=["NA"],
     )
     yield
 
