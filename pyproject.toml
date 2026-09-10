@@ -3,7 +3,10 @@ name = "cancerlike"
 version = "0.1.0"
 description = "Exploratory interface for the paipu mammalian cancer transcriptomics atlas"
 requires-python= ">=3.12"
-dependencies = []
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
 
 [project.scripts]
 cancerlike = "cancerlike.cli:main"
