@@ -7,3 +7,30 @@ dependencies = []
 
 [project.scripts]
 cancerlike = "cancerlike.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/cancerlike"]
+
+[dependency-groups]
+dev = ["pytest>=8.0", "ruff>=0.5", "mypy>=1.11"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["cancerlike"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true 
+mypy_path = "src"
+explicit_package_bases = true 
+files = ["src/cancerlike"]

@@ -1,5 +1,9 @@
 UV ?= uv
-.PHONY: sync lint fmt check
+.PHONY: help sync lint fmt check
+
+help: ## lists the targets 
+	@grep -E '^[a-zA-Z0-9_-]+:.*?##' $(MAKEFILE_LIST) | \
+		awk 'BEGIN{FS=":.*?## "}{printf " %-10s %s\n", $$1, $$2}'
 
 sync: ## installing the depndencies
 	$(UV) sync 
