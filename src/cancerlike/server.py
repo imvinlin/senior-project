@@ -18,6 +18,7 @@ FACET_COLUMNS = {
     "assay": "single_bulk",
     "clade": "clade",
 }
+SEX_LABEL_CONFIDENCE = "paipu_sex_confidence"
 
 
 class CohortFilter(BaseModel):
@@ -30,6 +31,12 @@ class CohortFilter(BaseModel):
     sex: list[str] = []
     assay: list[str] = []
     clade: list[str] = []
+
+
+class CohortSummary(BaseModel):
+    n: int
+    facets: dict[str, dict[str, int]]
+    sex_label_confidence: dict[str, int]
 
 
 @asynccontextmanager
@@ -57,11 +64,25 @@ def select(filters: CohortFilter) -> pl.DataFrame:
     return rows
 
 
+def tally(rows: pl.DataFrame, column: str) -> dict[str, int]:
+    counts = rows[column].drop_nulls().value_counts(sort=True)
+    return dict(zip(counts[column], counts["count"], strict=True))
+
+
+def facet_counts(rows: pl.DataFrame) -> dict[str, dict[str, int]]:
+    return {field: tally(rows, column) for field, column in FACET_COLUMNS.items()}
+
+
 @app.get("/api/health")
 def health() -> dict[str, int | bool]:
     return {"ok": True, "samples": SAMPLES.height}
 
 
 @app.get("/api/cohort")
-def cohort(filters: Annotated[CohortFilter, Query()]) -> dict[str, int]:
-    return {"n": select(filters).height}
+def cohort(filters: Annotated[CohortFilter, Query()]) -> CohortSummary:
+    rows = select(filters)
+    return CohortSummary(
+        n=rows.height,
+        facets=facet_counts(rows),
+        sex_label_confidence=tally(rows, SEX_LABEL_CONFIDENCE),
+    )
