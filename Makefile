@@ -1,5 +1,5 @@
 UV ?= uv
-.PHONY: help sync lint rfix fmt check dev 
+.PHONY: help sync lint rfix fmt check dev wcheck wdev 
 
 help: ## lists the targets 
 	@grep -E '^[a-zA-Z0-9_-]+:.*?##' $(MAKEFILE_LIST) | \
@@ -21,8 +21,14 @@ rfix: ## ruff check with fix
 fmt: ## format in place 
 	$(UV) run ruff format .
 
-check: lint ## pre commit gate 
+check: lint wcheck ## pre commit gate 
 
 dev: ## run the api with reload 
 	$(UV) run cancerlike serve --reload
+
+wcheck: ## typecheck and list the frontend
+	cd web && npx tsc --noEmit && npm run lint
+
+wdev: ## run the next dev server 
+	cd web && npm run dev
 
