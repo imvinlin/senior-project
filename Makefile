@@ -27,7 +27,7 @@ dev: ## run the api with reload
 	$(UV) run cancerlike serve --reload
 
 wcheck: ## typecheck and list the frontend
-	cd web && npx tsc --noEmit && npm run lint
+	cd web && npx next typegen && npx tsc --noEmit && npm run lint
 
 wdev: ## run the next dev server 
 	cd web && npm run dev
