@@ -10,6 +10,10 @@ async function fetchCohort(query: string): Promise<Cohort> {
 }
 
 
+function formatCount(n: number): string {
+  return n.toLocaleString("en-US");
+}
+
 export default function Home() {
   const [atlas, setAtlas] = useState<Cohort | null>(null);
   const [cohort, setCohort] = useState<Cohort | null>(null);
@@ -35,20 +39,26 @@ export default function Home() {
     };
   }, [species]);
 
-  if (error) return <main>API unreachable: {error}</main>;
-  if (!atlas || !cohort) return <main>Loading...</main>;
+  if (error) return <main className="p-6 text-red-700">API unreachable: {error}</main>;
+  if (!atlas || !cohort) return <main className="p-6 text-zinc-500">Loading...</main>;
   return (
     <main className="p-6">
-      <h1 className="text-2xl font-semibold">
-        CancerLike: {cohort.n} {cohort.n === 1 ? "sample" : "samples"}
-      </h1>
-      <label>
-        Species{" "}
-        <select value={species} onChange={(e) => setSpecies(e.target.value)}>
-          <option value="">All species ({atlas.n})</option>
+      <h1 className="text-2xl font-semibold">CancerLike</h1>
+      <p className="mt-1 text-zinc-600">
+        <span className="font-mono text-zinc-900">{formatCount(cohort.n)}</span>{" "}
+        {cohort.n === 1 ? "sample" : "samples"} in the active cohort
+      </p>
+      <label className="mt-6 flex w-fit flex-col gap-1 text-sm font-medium text-zinc-700">
+        Species
+        <select
+          className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-base font-normal text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent"
+          value={species}
+          onChange={(e) => setSpecies(e.target.value)}
+        >
+          <option value="">All species ({formatCount(atlas.n)})</option>
           {Object.entries(atlas.facets.species ?? {}).map(([name, count]) => (
             <option key={name} value={name}>
-              {name} ({count})
+              {name} ({formatCount(count)})
             </option>
           ))}
         </select>
