@@ -56,21 +56,21 @@ app = FastAPI(
 )
 
 
-def select(filters: CohortFilter) -> pl.DataFrame:
-    rows = SAMPLES
+def matching(filters: CohortFilter) -> pl.Series:
+    keep = pl.repeat(True, SAMPLES.height, eager=True)
     for field, values in filters.model_dump().items():
         if values:
-            rows = rows.filter(pl.col(FACET_COLUMNS[field]).is_in(values))
-    return rows
+            keep = keep & SAMPLES[FACET_COLUMNS[field]].is_in(values)
+    return keep
 
 
-def tally(rows: pl.DataFrame, column: str) -> dict[str, int]:
-    counts = rows[column].drop_nulls().value_counts(sort=True)
+def tally(column: str, keep: pl.Series) -> dict[str, int]:
+    counts = SAMPLES[column].filter(keep).drop_nulls().value_counts(sort=True)
     return dict(zip(counts[column], counts["count"], strict=True))
 
 
-def facet_counts(rows: pl.DataFrame) -> dict[str, dict[str, int]]:
-    return {field: tally(rows, column) for field, column in FACET_COLUMNS.items()}
+def facet_counts(keep: pl.Series) -> dict[str, dict[str, int]]:
+    return {field: tally(column, keep) for field, column in FACET_COLUMNS.items()}
 
 
 @app.get("/api/health")
@@ -80,9 +80,9 @@ def health() -> dict[str, int | bool]:
 
 @app.get("/api/cohort")
 def cohort(filters: Annotated[CohortFilter, Query()]) -> CohortSummary:
-    rows = select(filters)
+    keep = matching(filters)
     return CohortSummary(
-        n=rows.height,
-        facets=facet_counts(rows),
-        sex_label_confidence=tally(rows, SEX_LABEL_CONFIDENCE),
+        n=int(keep.sum()),
+        facets=facet_counts(keep),
+        sex_label_confidence=tally(SEX_LABEL_CONFIDENCE, keep),
     )
