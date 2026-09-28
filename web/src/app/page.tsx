@@ -38,8 +38,8 @@ export default function Home() {
   if (error) return <main>API unreachable: {error}</main>;
   if (!atlas || !cohort) return <main>Loading...</main>;
   return (
-    <main>
-      <h1>
+    <main className="p-6">
+      <h1 className="text-2xl font-semibold">
         CancerLike: {cohort.n} {cohort.n === 1 ? "sample" : "samples"}
       </h1>
       <label>
