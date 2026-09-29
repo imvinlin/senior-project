@@ -15,6 +15,11 @@ function formatCount(n: number): string {
   return n.toLocaleString("en-US");
 }
 
+function pushFilters(params: URLSearchParams) {
+  const next = params.toString();
+  window.history.pushState(null, "", next ? `?${next}` : window.location.pathname);
+}
+
 function useCohort() {
   const searchParams = useSearchParams();
   const query = searchParams.toString();
@@ -41,17 +46,68 @@ function useCohort() {
     const params = new URLSearchParams(query);
     if (value) params.set(name, value);
     else params.delete(name);
-    const next = params.toString();
-    window.history.pushState(null, "", next ? `?${next}` : window.location.pathname);
+    pushFilters(params);
   }
 
-  return { cohort, error, filters: searchParams, setFilter };
+  function removeFilter(name: string, value: string) {
+    const params = new URLSearchParams(query);
+    params.delete(name, value);
+    pushFilters(params);
+  }
+
+  function clearFilters() {
+    pushFilters(new URLSearchParams());
+  }
+
+  return { cohort, error, filters: searchParams, setFilter, removeFilter, clearFilters };
+}
+
+function CohortBar({
+  chips,
+  removeFilter,
+  clearFilters,
+}: {
+  chips: [string, string][];
+  removeFilter: (name: string, value: string) => void;
+  clearFilters: () => void;
+}) {
+  return (
+    <div className="mt-3 flex min-h-7 flex-wrap items-center gap-2 text-sm">
+      {chips.length === 0 && <span className="text-zinc-500">No filters applied</span>}
+      {chips.map(([facet, value]) => (
+        <span
+          key={`${facet}=${value}`}
+          className="inline-flex items-center gap-1 rounded border border-zinc-300 bg-zinc-50 py-0.5 pl-2 pr-1"
+        >
+          <span className="text-zinc-500">{facet}</span>
+          {value}
+          <button
+            type="button"
+            aria-label={`Remove ${facet} ${value}`}
+            className="rounded px-1 text-zinc-500 hover:text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent"
+            onClick={() => removeFilter(facet, value)}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      {chips.length > 0 && (
+        <button
+          type="button"
+          className="rounded px-1 text-accent hover:underline focus:outline-none focus:ring-2 focus:ring-accent"
+          onClick={clearFilters}
+        >
+          Clear all
+        </button>
+      )}
+    </div>
+  );
 }
 
 const loading = <main className="p-6 text-zinc-500">Loading...</main>;
 
 function CohortExplorer() {
-  const { cohort, error, filters, setFilter } = useCohort();
+  const { cohort, error, filters, setFilter, removeFilter, clearFilters } = useCohort();
 
   if (error) return <main className="p-6 text-red-700">Could not load the cohort: {error}</main>;
   if (!cohort) return loading;
@@ -62,7 +118,12 @@ function CohortExplorer() {
         <span className="font-mono text-zinc-900">{formatCount(cohort.n)}</span>{" "}
         {cohort.n === 1 ? "sample" : "samples"} in the active cohort
       </p>
-      <div className="mt-6 flex flex-wrap gap-x-4 gap-y-3">
+      <CohortBar
+        chips={[...filters.entries()]}
+        removeFilter={removeFilter}
+        clearFilters={clearFilters}
+      />
+      <div className="mt-4 flex flex-wrap gap-x-4 gap-y-3">
         {Object.entries(cohort.facets).map(([facet, counts]) => {
           const value = filters.get(facet) ?? "";
           // why: every facet column is 100% filled, so its counts sum to the cohort without this filter
