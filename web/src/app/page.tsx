@@ -15,7 +15,9 @@ function formatCount(n: number): string {
   return n.toLocaleString("en-US");
 }
 
-function useCohortQuery(query: string) {
+function useCohort() {
+  const searchParams = useSearchParams();
+  const query = searchParams.toString();
   const [cohort, setCohort] = useState<Cohort | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,39 +37,24 @@ function useCohortQuery(query: string) {
     };
   }, [query]);
 
-  return { cohort, error };
-}
-
-function useCohort() {
-  const searchParams = useSearchParams();
-  const atlas = useCohortQuery("");
-  const active = useCohortQuery(searchParams.toString());
-
   function setFilter(name: string, value: string) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(query);
     if (value) params.set(name, value);
     else params.delete(name);
-    const query = params.toString();
-    window.history.pushState(null, "", query ? `?${query}` : window.location.pathname);
+    const next = params.toString();
+    window.history.pushState(null, "", next ? `?${next}` : window.location.pathname);
   }
 
-  return {
-    atlas: atlas.cohort,
-    cohort: active.cohort,
-    error: atlas.error ?? active.error,
-    species: searchParams.get("species") ?? "",
-    setFilter,
-  };
+  return { cohort, error, filters: searchParams, setFilter };
 }
 
 const loading = <main className="p-6 text-zinc-500">Loading...</main>;
 
 function CohortExplorer() {
-  const { atlas, cohort, error, species, setFilter } = useCohort();
+  const { cohort, error, filters, setFilter } = useCohort();
 
   if (error) return <main className="p-6 text-red-700">Could not load the cohort: {error}</main>;
-  if (!atlas || !cohort) return loading;
-  const speciesCounts = atlas.facets.species ?? {};
+  if (!cohort) return loading;
   return (
     <main className="p-6">
       <h1 className="text-2xl font-semibold">CancerLike</h1>
@@ -75,24 +62,36 @@ function CohortExplorer() {
         <span className="font-mono text-zinc-900">{formatCount(cohort.n)}</span>{" "}
         {cohort.n === 1 ? "sample" : "samples"} in the active cohort
       </p>
-      <label className="mt-6 flex w-fit flex-col gap-1 text-sm font-medium text-zinc-700">
-        Species
-        <select
-          className="rounded border border-zinc-300 bg-white px-2 py-1.5 text-base font-normal text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent"
-          value={species}
-          onChange={(e) => setFilter("species", e.target.value)}
-        >
-          <option value="">All species ({formatCount(atlas.n)})</option>
-          {species && !Object.hasOwn(speciesCounts, species) && (
-            <option value={species}>{species} (0)</option>
-          )}
-          {Object.entries(speciesCounts).map(([name, count]) => (
-            <option key={name} value={name}>
-              {name} ({formatCount(count)})
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="mt-6 flex flex-wrap gap-x-4 gap-y-3">
+        {Object.entries(cohort.facets).map(([facet, counts]) => {
+          const value = filters.get(facet) ?? "";
+          // why: every facet column is 100% filled, so its counts sum to the cohort without this filter
+          const total = Object.values(counts).reduce((a, b) => a + b, 0);
+          return (
+            <label
+              key={facet}
+              className="flex flex-col gap-1 text-sm font-medium capitalize text-zinc-700"
+            >
+              {facet}
+              <select
+                className="w-64 rounded border border-zinc-300 bg-white px-2 py-1.5 text-base font-normal normal-case text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent"
+                value={value}
+                onChange={(e) => setFilter(facet, e.target.value)}
+              >
+                <option value="">All ({formatCount(total)})</option>
+                {value && !Object.hasOwn(counts, value) && (
+                  <option value={value}>{value} (0)</option>
+                )}
+                {Object.entries(counts).map(([name, count]) => (
+                  <option key={name} value={name}>
+                    {name} ({formatCount(count)})
+                  </option>
+                ))}
+              </select>
+            </label>
+          );
+        })}
+      </div>
     </main>
   );
 }
