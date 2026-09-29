@@ -56,10 +56,10 @@ app = FastAPI(
 )
 
 
-def matching(filters: CohortFilter) -> pl.Series:
+def matching(filters: CohortFilter, skip: str | None = None) -> pl.Series:
     keep = pl.repeat(True, SAMPLES.height, eager=True)
     for field, values in filters.model_dump().items():
-        if values:
+        if values and field != skip:
             keep = keep & SAMPLES[FACET_COLUMNS[field]].is_in(values)
     return keep
 
@@ -69,8 +69,11 @@ def tally(column: str, keep: pl.Series) -> dict[str, int]:
     return dict(zip(counts[column], counts["count"], strict=True))
 
 
-def facet_counts(keep: pl.Series) -> dict[str, dict[str, int]]:
-    return {field: tally(column, keep) for field, column in FACET_COLUMNS.items()}
+def facet_counts(filters: CohortFilter) -> dict[str, dict[str, int]]:
+    return {
+        field: tally(column, matching(filters, skip=field))
+        for field, column in FACET_COLUMNS.items()
+    }
 
 
 @app.get("/api/health")
@@ -83,6 +86,6 @@ def cohort(filters: Annotated[CohortFilter, Query()]) -> CohortSummary:
     keep = matching(filters)
     return CohortSummary(
         n=int(keep.sum()),
-        facets=facet_counts(keep),
+        facets=facet_counts(filters),
         sex_label_confidence=tally(SEX_LABEL_CONFIDENCE, keep),
     )
