@@ -1,6 +1,5 @@
 import { formatCount } from "@/lib/format";
-
-const SMALL_GROUP = 5;
+import { SMALL_GROUP } from "@/lib/support";
 
 function formatShare(count: number, n: number): string {
   const percent = (count / n) * 100;

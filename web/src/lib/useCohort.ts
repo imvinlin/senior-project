@@ -1,13 +1,8 @@
 import { useSearchParams } from "next/navigation";
-import { useEffect, useState } from "react";
+
+import { useApi } from "@/lib/useApi";
 
 type Cohort = { n: number; facets: Record<string, Record<string, number>> };
-
-async function fetchCohort(query: string): Promise<Cohort> {
-  const r = await fetch(`/api/cohort?${query}`);
-  if (!r.ok) throw new Error(`API answered ${r.status}`);
-  return r.json() as Promise<Cohort>;
-}
 
 function pushFilters(params: URLSearchParams) {
   const next = params.toString();
@@ -17,29 +12,14 @@ function pushFilters(params: URLSearchParams) {
 export function useCohort() {
   const searchParams = useSearchParams();
   const query = searchParams.toString();
-  const [cohort, setCohort] = useState<Cohort | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const { data: cohort, error } = useApi<Cohort>(`/api/cohort?${query}`);
 
-  useEffect(() => {
-    let stale = false;
-    fetchCohort(query)
-      .then((c) => {
-        if (stale) return;
-        setCohort(c);
-        setError(null);
-      })
-      .catch((e: Error) => {
-        if (!stale) setError(e.message);
-      });
-    return () => {
-      stale = true;
-    };
-  }, [query]);
-
-  function setFilter(name: string, value: string) {
+  function setFilters(values: Record<string, string>) {
     const params = new URLSearchParams(query);
-    if (value) params.set(name, value);
-    else params.delete(name);
+    for (const [name, value] of Object.entries(values)) {
+      if (value) params.set(name, value);
+      else params.delete(name);
+    }
     pushFilters(params);
   }
 
@@ -53,5 +33,5 @@ export function useCohort() {
     pushFilters(new URLSearchParams());
   }
 
-  return { cohort, error, filters: searchParams, setFilter, removeFilter, clearFilters };
+  return { cohort, error, filters: searchParams, setFilters, removeFilter, clearFilters };
 }

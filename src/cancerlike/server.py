@@ -78,7 +78,8 @@ def matching(filters: CohortFilter, skip: str | None = None) -> pl.Series:
 
 
 def tally(column: str, keep: pl.Series) -> dict[str, int]:
-    counts = SAMPLES[column].filter(keep).drop_nulls().value_counts(sort=True)
+    counts = SAMPLES[column].filter(keep).drop_nulls().value_counts()
+    counts = counts.sort("count", column, descending=[True, False])
     return dict(zip(counts[column], counts["count"], strict=True))
 
 

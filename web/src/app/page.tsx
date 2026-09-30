@@ -3,6 +3,7 @@
 import { Suspense } from "react";
 
 import { CohortBar } from "@/components/CohortBar";
+import { CoverageTable } from "@/components/CoverageTable";
 import { SpeciesSupport } from "@/components/SpeciesSupport";
 import { formatCount } from "@/lib/format";
 import { useCohort } from "@/lib/useCohort";
@@ -10,7 +11,7 @@ import { useCohort } from "@/lib/useCohort";
 const loading = <main className="p-6 text-zinc-500">Loading...</main>;
 
 function CohortExplorer() {
-  const { cohort, error, filters, setFilter, removeFilter, clearFilters } = useCohort();
+  const { cohort, error, filters, setFilters, removeFilter, clearFilters } = useCohort();
 
   if (error) return <main className="p-6 text-red-700">Could not load the cohort: {error}</main>;
   if (!cohort) return loading;
@@ -44,7 +45,7 @@ function CohortExplorer() {
               <select
                 className="w-64 rounded border border-zinc-300 bg-white px-2 py-1.5 text-base font-normal normal-case text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent"
                 value={value}
-                onChange={(e) => setFilter(facet, e.target.value)}
+                onChange={(e) => setFilters({ [facet]: e.target.value })}
               >
                 <option value="">All ({formatCount(total)})</option>
                 {value && !Object.hasOwn(counts, value) && (
@@ -61,6 +62,7 @@ function CohortExplorer() {
         })}
       </div>
       <SpeciesSupport groups={groups} n={cohort.n} />
+      <CoverageTable query={filters.toString()} setFilters={setFilters} />
     </main>
   );
 }
