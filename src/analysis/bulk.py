@@ -1,4 +1,6 @@
 from pathlib import Path
+from scipy import stats
+import numpy as np
 import pandas as pd
 
 EXPRESSION_PATH = Path("data/raw/Paipu_deduplicated_expression.tsv")
@@ -53,23 +55,64 @@ def load_samples(
     return expression, metadata
 
 
+# using Welch two-sample test
+# effect = comparison mean - reference mean
 def diff_exp(
         expression: pd.DataFrame,
         labels: pd.Series,
         reference: str,
         comparison: str,
-        min_samples: int = 2
+        min_replicates: int = 2
 ) -> pd.DataFrame:
-    return pd.DataFrame()
+    ref_ids = labels.index[labels.eq(
+        reference)].intersection(expression.columns)
+    cmp_ids = labels.index[labels.eq(
+        comparison)].intersection(expression.columns)
+    if len(ref_ids) < min_replicates or len(cmp_ids) < min_replicates:
+        raise ValueError(
+            f"Need at least {min_replicates} samples per group; found "
+            f"{reference}={len(ref_ids)}, {comparison}={len(cmp_ids)}"
+        )
+    ref = expression[ref_ids].to_numpy(dtype=float)
+    cmp = expression[cmp_ids].to_numpy(dtype=float)
+    mean_ref = np.nanmean(ref, axis=1)
+    mean_cmp = np.nanmean(cmp, axis=1)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        test = stats.ttest_ind(
+            cmp, ref, axis=1, equal_var=False, nan_policy="omit")
+    pval = np.asarray(test.pvalue, dtype=float)
+    pval[~np.isfinite(pval)] = 1.0
+    # Benjamini-Hochberg adjusted p-vals, monotone from largest p-val down
+    order = np.argsort(pval)
+    ranked = pval[order] * len(pval) / np.arange(1, len(pval) + 1)
+    ranked = np.minimum.accumulate(ranked[::-1])[::-1]
+    padj = np.empty_like(ranked)
+    padj[order] = np.minimum(ranked, 1.0)
+    return pd.DataFrame(
+        {
+            "gene": expression.index,
+            "mean_reference": mean_ref,
+            "mean_comparison": mean_cmp,
+            "log2fc": mean_cmp - mean_ref,
+            "statistic": np.asarray(test.statistic),
+            "pval": pval,
+            "padj": padj,
+        }
+    ).sort_values("padj", kind="stable")
 
 
 def main() -> int:
     expression, metadata = load_samples(
         filter_field="disease", filter_vals=["melanoma", "Melanoma"])
-    print(expression.head())
-    print(metadata.head())
-    print(expression.shape)
-    print(metadata.shape)
+    labels = metadata["disease"]
+    # print(labels.index)
+    # print(labels.head)
+    print(expression.columns)
+    print(expression.index)
+    # print(expression.columns.head)
+    # print(metadata.head)
+    # print(expression.shape)
+    # print(metadata.shape)
     return 0
 
 
