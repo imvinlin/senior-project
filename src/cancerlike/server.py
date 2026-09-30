@@ -39,6 +39,19 @@ class CohortSummary(BaseModel):
     sex_label_confidence: dict[str, int]
 
 
+class CoverageCell(BaseModel):
+    species: str
+    cancer: str
+    n: int
+    atlas: int
+
+
+class Coverage(BaseModel):
+    species: list[str]
+    cancers: list[str]
+    cells: list[CoverageCell]
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     global SAMPLES
@@ -76,6 +89,11 @@ def facet_counts(filters: CohortFilter) -> dict[str, dict[str, int]]:
     }
 
 
+def by_size(cells: pl.DataFrame, axis: str) -> list[str]:
+    totals = cells.group_by(axis).agg(pl.col("atlas").sum())
+    return totals.sort("atlas", axis, descending=[True, False])[axis].to_list()
+
+
 @app.get("/api/health")
 def health() -> dict[str, int | bool]:
     return {"ok": True, "samples": SAMPLES.height}
@@ -88,4 +106,21 @@ def cohort(filters: Annotated[CohortFilter, Query()]) -> CohortSummary:
         n=int(keep.sum()),
         facets=facet_counts(filters),
         sex_label_confidence=tally(SEX_LABEL_CONFIDENCE, keep),
+    )
+
+
+@app.get("/api/coverage")
+def coverage(filters: Annotated[CohortFilter, Query()]) -> Coverage:
+    keep = matching(filters.model_copy(update={"species": [], "cancer": []}))
+    axes = {name: SAMPLES[FACET_COLUMNS[name]] for name in ("species", "cancer")}
+    cells = (
+        pl.DataFrame({**axes, "keep": keep})
+        .group_by("species", "cancer")
+        .agg(n=pl.col("keep").sum(), atlas=pl.len())
+        .sort("species", "cancer")
+    )
+    return Coverage(
+        species=by_size(cells, "species"),
+        cancers=by_size(cells, "cancer"),
+        cells=[CoverageCell(**cell) for cell in cells.to_dicts()],
     )
