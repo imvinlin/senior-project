@@ -11,8 +11,9 @@ METADATA = Path("data/raw/Paipu_deduplicated_metadata.tsv")
 SAMPLES: pl.DataFrame
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
-    "cancer": "paipu_cancer_type_final",
     "system": "paipu_cancer_system",
+    "cancer": "paipu_cancer_type_final",
+    "subtype": "paipu_cancer_type",
     "tissue": "paipu_tissue_final",
     "sex": "paipu_sex_final",
     "assay": "single_bulk",
@@ -25,8 +26,9 @@ class CohortFilter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     species: list[str] = []
-    cancer: list[str] = []
     system: list[str] = []
+    cancer: list[str] = []
+    subtype: list[str] = []
     tissue: list[str] = []
     sex: list[str] = []
     assay: list[str] = []
