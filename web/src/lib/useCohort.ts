@@ -23,6 +23,13 @@ export function useCohort() {
     pushFilters(params);
   }
 
+  function toggleFilter(name: string, value: string) {
+    const params = new URLSearchParams(query);
+    if (params.getAll(name).includes(value)) params.delete(name, value);
+    else params.append(name, value);
+    pushFilters(params);
+  }
+
   function removeFilter(name: string, value: string) {
     const params = new URLSearchParams(query);
     params.delete(name, value);
@@ -33,5 +40,13 @@ export function useCohort() {
     pushFilters(new URLSearchParams());
   }
 
-  return { cohort, error, filters: searchParams, setFilters, removeFilter, clearFilters };
+  return {
+    cohort,
+    error,
+    filters: searchParams,
+    setFilters,
+    toggleFilter,
+    removeFilter,
+    clearFilters,
+  };
 }
