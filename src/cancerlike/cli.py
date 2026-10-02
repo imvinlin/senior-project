@@ -10,6 +10,8 @@ def main(argv: list[str] | None = None) -> int:
     serve.add_argument("--port", type=int, default=8000)
     serve.add_argument("--reload", action="store_true")
 
+    sub.add_parser("prep", help="write data/derived (pca coordinates) from data/raw")
+
     args = parser.parse_args(argv)
 
     if args.command == "serve":
@@ -21,6 +23,12 @@ def main(argv: list[str] | None = None) -> int:
             port=args.port,
             reload=args.reload,
         )
+        return 0
+
+    if args.command == "prep":
+        from cancerlike.prep import run
+
+        run()
         return 0
 
     parser.print_help()
