@@ -1,14 +1,18 @@
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
 import polars as pl
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
 from pydantic import BaseModel, ConfigDict
 
 METADATA = Path("data/raw/Paipu_deduplicated_metadata.tsv")
+DERIVED = Path("data/derived")
 SAMPLES: pl.DataFrame
+POINTS: pl.DataFrame | None = None
+VARIANCE: list[float] = []
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
     "system": "paipu_cancer_system",
@@ -54,15 +58,39 @@ class Coverage(BaseModel):
     cells: list[CoverageCell]
 
 
+class PcaPoint(BaseModel):
+    run_accession: str
+    species: str
+    cancer: str
+    study: str
+    pc1: float
+    pc2: float
+
+
+class PcaView(BaseModel):
+    points: list[PcaPoint]
+    variance: list[float]
+    excluded: int
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES
+    global SAMPLES, POINTS, VARIANCE
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
         infer_schema_length=0,
         null_values=["NA"],
     )
+    if (DERIVED / "pca.parquet").exists():
+        POINTS = SAMPLES.select(
+            "run_accession",
+            species=FACET_COLUMNS["species"],
+            cancer=FACET_COLUMNS["cancer"],
+            study="bioproject",
+        ).join(pl.read_parquet(DERIVED / "pca.parquet"), on="run_accession", how="left")
+        manifest = json.loads((DERIVED / "manifest.json").read_text())
+        VARIANCE = manifest["pca"]["explained_variance_ratio"]
     yield
 
 
@@ -126,4 +154,19 @@ def coverage(filters: Annotated[CohortFilter, Query()]) -> Coverage:
         species=by_size(cells, "species"),
         cancers=by_size(cells, "cancer"),
         cells=[CoverageCell(**cell) for cell in cells.to_dicts()],
+    )
+
+
+@app.get("/api/pca")
+def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
+    if POINTS is None:
+        raise HTTPException(status_code=503, detail="no pca coordinates, run make prep first")
+    rows = POINTS.filter(matching(filters))
+    placed = rows.drop_nulls("pc1")
+    fields = list(PcaPoint.model_fields)
+    rounded = placed.select(fields).with_columns(pl.col("pc1", "pc2").cast(pl.Float64).round(2))
+    return PcaView(
+        points=[PcaPoint(**point) for point in rounded.to_dicts()],
+        variance=VARIANCE,
+        excluded=rows.height - placed.height,
     )

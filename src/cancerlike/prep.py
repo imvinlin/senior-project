@@ -24,6 +24,7 @@ def md5(path: Path) -> str:
 
 
 def pca(matrix: NDArray[np.float64], k: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    # used sample space gram matrix because 3,484 (sample) vs ~20k (feature)
     centered = matrix - matrix.mean(axis=0)
     values, vectors = np.linalg.eigh(centered @ centered.T)
     values = values.clip(min=0)
