@@ -9,6 +9,8 @@ function pushFilters(params: URLSearchParams) {
   window.history.pushState(null, "", next ? `?${next}` : window.location.pathname);
 }
 
+export type CohortState = ReturnType<typeof useCohort>;
+
 export function useCohort() {
   const searchParams = useSearchParams();
   const query = searchParams.toString();

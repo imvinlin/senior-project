@@ -7,6 +7,7 @@ const config: Config = {
       colors: {
         accent: "#4a6fa5",
         heat: { 1: "#86b6ef", 2: "#3987e5", 3: "#1c5cab", 4: "#0d366b" },
+        series: { 1: "#2a78d6", 2: "#eb6834", 3: "#1baf7a" },
       },
       fontFamily: {
         sans: ["var(--font-inter)", "sans-serif"],
