@@ -13,6 +13,8 @@ DERIVED = Path("data/derived")
 SAMPLES: pl.DataFrame
 POINTS: pl.DataFrame | None = None
 VARIANCE: list[float] = []
+EXTENT: dict[str, list[float]] = {}
+PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
     "system": "paipu_cancer_system",
@@ -65,17 +67,21 @@ class PcaPoint(BaseModel):
     study: str
     pc1: float
     pc2: float
+    pc3: float
+    pc4: float
+    pc5: float
 
 
 class PcaView(BaseModel):
     points: list[PcaPoint]
     variance: list[float]
+    extent: dict[str, list[float]]
     excluded: int
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES, POINTS, VARIANCE
+    global SAMPLES, POINTS, VARIANCE, EXTENT
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
@@ -91,6 +97,10 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         ).join(pl.read_parquet(DERIVED / "pca.parquet"), on="run_accession", how="left")
         manifest = json.loads((DERIVED / "manifest.json").read_text())
         VARIANCE = manifest["pca"]["explained_variance_ratio"]
+        placed = POINTS.drop_nulls("pc1")
+        low = placed.select(pl.col(PCS).min()).row(0)
+        high = placed.select(pl.col(PCS).max()).row(0)
+        EXTENT = {pc: [round(a, 2), round(b, 2)] for pc, a, b in zip(PCS, low, high, strict=True)}
     yield
 
 
@@ -164,9 +174,10 @@ def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
     rows = POINTS.filter(matching(filters))
     placed = rows.drop_nulls("pc1")
     fields = list(PcaPoint.model_fields)
-    rounded = placed.select(fields).with_columns(pl.col("pc1", "pc2").cast(pl.Float64).round(2))
+    rounded = placed.select(fields).with_columns(pl.col(PCS).cast(pl.Float64).round(2))
     return PcaView(
         points=[PcaPoint(**point) for point in rounded.to_dicts()],
         variance=VARIANCE,
+        extent=EXTENT,
         excluded=rows.height - placed.height,
     )

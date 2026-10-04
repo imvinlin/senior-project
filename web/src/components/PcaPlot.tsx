@@ -2,8 +2,15 @@ import { useState } from "react";
 
 import { formatCount } from "@/lib/format";
 
-type Point = { run_accession: string; species: string; cancer: string; study: string; pc1: number; pc2: number };
-export type PcaView = { points: Point[]; variance: number[]; excluded: number };
+const AXES = ["pc1", "pc2", "pc3", "pc4", "pc5"] as const;
+type Axis = (typeof AXES)[number];
+type Point = { run_accession: string; species: string; cancer: string; study: string } & Record<Axis, number>;
+export type PcaView = {
+  points: Point[];
+  variance: number[];
+  extent: Record<string, [number, number]>;
+  excluded: number;
+};
 
 const SERIES: Record<string, { dot: string; swatch: string }> = {
   "Canis lupus familiaris": { dot: "fill-series-1", swatch: "bg-series-1" },
@@ -14,20 +21,42 @@ const OTHER = { dot: "fill-zinc-400", swatch: "bg-zinc-400" };
 const W = 760;
 const H = 520;
 const PAD = { left: 56, right: 16, top: 16, bottom: 48 };
+const BUTTON =
+  "rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-700 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-accent";
+const SELECT =
+  "rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent";
 
-function scale(values: number[], from: number, to: number) {
-  const lo = Math.min(...values);
-  const span = Math.max(...values) - lo || 1;
+function scale([lo, hi]: [number, number], from: number, to: number) {
+  const span = hi - lo || 1;
   return (v: number) => from + ((v - lo) / span) * (to - from);
+}
+
+function cohortExtent(points: Point[], axis: Axis): [number, number] {
+  const values = points.map((p) => p[axis]);
+  return [Math.min(...values), Math.max(...values)];
 }
 
 function percent(ratio: number | undefined): string {
   return `${((ratio ?? 0) * 100).toFixed(1)}%`;
 }
 
+function downloadCsv(points: Point[]) {
+  const columns = ["run_accession", "species", "cancer", "study", ...AXES];
+  const rows = points.map((p) => columns.map((c) => JSON.stringify(p[c as keyof Point])).join(","));
+  const blob = new Blob([[columns.join(","), ...rows].join("\n")], { type: "text/csv" });
+  const link = document.createElement("a");
+  link.href = URL.createObjectURL(blob);
+  link.download = "cancerlike-pca.csv";
+  link.click();
+  URL.revokeObjectURL(link.href);
+}
+
 export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
   const [hover, setHover] = useState<Point | null>(null);
-  const { points, variance, excluded } = view;
+  const [xAxis, setXAxis] = useState<Axis>("pc1");
+  const [yAxis, setYAxis] = useState<Axis>("pc2");
+  const [zoomed, setZoomed] = useState(false);
+  const { points, variance, extent, excluded } = view;
   if (points.length === 0) {
     return (
       <p className="mt-2 text-sm text-zinc-500">
@@ -36,8 +65,9 @@ export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
       </p>
     );
   }
-  const x = scale(points.map((p) => p.pc1), PAD.left + 8, W - PAD.right - 8);
-  const y = scale(points.map((p) => p.pc2), H - PAD.bottom - 8, PAD.top + 8);
+  const frame = (axis: Axis) => (zoomed ? cohortExtent(points, axis) : (extent[axis] ?? [0, 1]));
+  const x = scale(frame(xAxis), PAD.left + 8, W - PAD.right - 8);
+  const y = scale(frame(yAxis), H - PAD.bottom - 8, PAD.top + 8);
   const counts = new Map<string, number>();
   for (const p of points) counts.set(p.species, (counts.get(p.species) ?? 0) + 1);
   const colored = [...counts].filter(([species]) => species in SERIES).sort((a, b) => b[1] - a[1]);
@@ -45,6 +75,7 @@ export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
   const otherN = other.reduce((sum, [, count]) => sum + count, 0);
   const studies = new Set(points.map((p) => p.study)).size;
   const ordered = [...points.filter((p) => !(p.species in SERIES)), ...points.filter((p) => p.species in SERIES)];
+  const label = (axis: Axis) => `${axis.toUpperCase()} (${percent(variance[AXES.indexOf(axis)])} of variance)`;
 
   function nearest(e: React.MouseEvent<SVGSVGElement>) {
     const box = e.currentTarget.getBoundingClientRect();
@@ -53,7 +84,7 @@ export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
     let best: Point | null = null;
     let bestDistance = 64;
     for (const p of points) {
-      const distance = (x(p.pc1) - mx) ** 2 + (y(p.pc2) - my) ** 2;
+      const distance = (x(p[xAxis]) - mx) ** 2 + (y(p[yAxis]) - my) ** 2;
       if (distance < bestDistance) {
         bestDistance = distance;
         best = p;
@@ -62,85 +93,116 @@ export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
     setHover(best);
   }
 
+  const axisPicker = (value: Axis, onChange: (axis: Axis) => void) => (
+    <select className={SELECT} value={value} onChange={(e) => onChange(e.target.value as Axis)}>
+      {AXES.map((axis) => (
+        <option key={axis} value={axis}>
+          {label(axis)}
+        </option>
+      ))}
+    </select>
+  );
+
   return (
-    <div className="mt-3 flex flex-wrap gap-6">
-      <div className="relative">
-        <svg
-          width={W}
-          height={H}
-          className="rounded border border-zinc-200"
-          onMouseMove={nearest}
-          onMouseLeave={() => setHover(null)}
-        >
-          <text x={(PAD.left + W - PAD.right) / 2} y={H - 12} textAnchor="middle" className="fill-zinc-600 text-xs">
-            PC1 ({percent(variance[0])} of variance)
-          </text>
-          <text
-            x={14}
-            y={(PAD.top + H - PAD.bottom) / 2}
-            transform={`rotate(-90 14 ${(PAD.top + H - PAD.bottom) / 2})`}
-            textAnchor="middle"
-            className="fill-zinc-600 text-xs"
-          >
-            PC2 ({percent(variance[1])} of variance)
-          </text>
-          {ordered.map((p) => (
-            <circle
-              key={p.run_accession}
-              cx={x(p.pc1)}
-              cy={y(p.pc2)}
-              r={3}
-              fillOpacity={0.7}
-              strokeWidth={0.6}
-              className={`${(SERIES[p.species] ?? OTHER).dot} stroke-white`}
-            />
-          ))}
-          {hover && (
-            <circle cx={x(hover.pc1)} cy={y(hover.pc2)} r={6} className="fill-none stroke-zinc-900" strokeWidth={1.5} />
-          )}
-        </svg>
-        {hover && (
-          <div
-            className="pointer-events-none absolute rounded bg-zinc-900 px-2 py-1 text-xs text-white"
-            style={{ left: x(hover.pc1) + 12, top: y(hover.pc2) - 40 }}
-          >
-            <span className="font-mono">{hover.run_accession}</span>
-            <br />
-            {hover.species} · {hover.cancer} · {hover.study}
-          </div>
-        )}
+    <div className="mt-3">
+      <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-700">
+        <span>X</span>
+        {axisPicker(xAxis, setXAxis)}
+        <span>Y</span>
+        {axisPicker(yAxis, setYAxis)}
+        <button type="button" className={BUTTON} onClick={() => setZoomed(!zoomed)}>
+          {zoomed ? "Show full atlas" : "Zoom to cohort"}
+        </button>
+        <button type="button" className={BUTTON} onClick={() => downloadCsv(points)}>
+          Download CSV
+        </button>
       </div>
-      <div className="w-72 text-sm">
-        <h3 className="font-medium text-zinc-700">Samples per species</h3>
-        <ul className="mt-2">
-          {colored.map(([species, count]) => (
-            <li key={species} className="flex items-center gap-2 py-0.5">
-              <span className={`h-2.5 w-2.5 rounded-full ${(SERIES[species] ?? OTHER).swatch}`} />
-              <span className="italic">{species}</span>
-              <span className="ml-auto font-mono text-zinc-500">{formatCount(count)}</span>
-            </li>
-          ))}
-          {other.length > 0 && (
-            <li className="flex items-center gap-2 py-0.5">
-              <span className={`h-2.5 w-2.5 rounded-full ${OTHER.swatch}`} />
-              <span>Other ({other.length === 1 ? "1 species" : `${other.length} species`})</span>
-              <span className="ml-auto font-mono text-zinc-500">{formatCount(otherN)}</span>
-            </li>
+      <div className="mt-3 flex flex-wrap gap-6">
+        <div className="relative">
+          <svg
+            width={W}
+            height={H}
+            className="rounded border border-zinc-200"
+            onMouseMove={nearest}
+            onMouseLeave={() => setHover(null)}
+          >
+            <text x={(PAD.left + W - PAD.right) / 2} y={H - 12} textAnchor="middle" className="fill-zinc-600 text-xs">
+              {label(xAxis)}
+            </text>
+            <text
+              x={14}
+              y={(PAD.top + H - PAD.bottom) / 2}
+              transform={`rotate(-90 14 ${(PAD.top + H - PAD.bottom) / 2})`}
+              textAnchor="middle"
+              className="fill-zinc-600 text-xs"
+            >
+              {label(yAxis)}
+            </text>
+            {ordered.map((p) => (
+              <circle
+                key={p.run_accession}
+                cx={x(p[xAxis])}
+                cy={y(p[yAxis])}
+                r={3}
+                fillOpacity={0.7}
+                strokeWidth={0.6}
+                className={`${(SERIES[p.species] ?? OTHER).dot} stroke-white`}
+              />
+            ))}
+            {hover && (
+              <circle
+                cx={x(hover[xAxis])}
+                cy={y(hover[yAxis])}
+                r={6}
+                className="fill-none stroke-zinc-900"
+                strokeWidth={1.5}
+              />
+            )}
+          </svg>
+          {hover && (
+            <div
+              className="pointer-events-none absolute rounded bg-zinc-900 px-2 py-1 text-xs text-white"
+              style={{ left: x(hover[xAxis]) + 12, top: y(hover[yAxis]) - 40 }}
+            >
+              <span className="font-mono">{hover.run_accession}</span>
+              <br />
+              {hover.species} · {hover.cancer} · {hover.study}
+            </div>
           )}
-        </ul>
-        <p className="mt-4 text-zinc-600">
-          {formatCount(points.length)} of {formatCount(n)} cohort samples are plotted. The other{" "}
-          {formatCount(excluded)} are single-cell and have no coordinates.
-        </p>
-        <p className="mt-2 text-zinc-600">
-          The embedding was fit once on all 3,089 bulk samples, so PC1 means the same thing for every cohort.
-        </p>
-        {studies > 1 && (
-          <p className="mt-2 text-amber-700">
-            These samples come from {formatCount(studies)} studies. Clusters can reflect study as much as
-            biology.
+        </div>
+        <div className="w-72 text-sm">
+          <h3 className="font-medium text-zinc-700">Samples per species</h3>
+          <ul className="mt-2">
+            {colored.map(([species, count]) => (
+              <li key={species} className="flex items-center gap-2 py-0.5">
+                <span className={`h-2.5 w-2.5 rounded-full ${(SERIES[species] ?? OTHER).swatch}`} />
+                <span className="italic">{species}</span>
+                <span className="ml-auto font-mono text-zinc-500">{formatCount(count)}</span>
+              </li>
+            ))}
+            {other.length > 0 && (
+              <li className="flex items-center gap-2 py-0.5">
+                <span className={`h-2.5 w-2.5 rounded-full ${OTHER.swatch}`} />
+                <span>Other ({other.length === 1 ? "1 species" : `${other.length} species`})</span>
+                <span className="ml-auto font-mono text-zinc-500">{formatCount(otherN)}</span>
+              </li>
+            )}
+          </ul>
+          <p className="mt-4 text-zinc-600">
+            {formatCount(points.length)} of {formatCount(n)} cohort samples are plotted. The other{" "}
+            {formatCount(excluded)} are single-cell and have no coordinates.
           </p>
-        )}
+          <p className="mt-2 text-zinc-600">
+            The embedding was fit once on all 3,089 bulk samples, so PC1 means the same thing for every
+            cohort. The frame is the whole atlas unless you zoom.
+          </p>
+          {studies > 1 && (
+            <p className="mt-2 text-amber-700">
+              These samples come from {formatCount(studies)} studies. Clusters can reflect study as much
+              as biology.
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
