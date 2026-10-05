@@ -6,6 +6,7 @@ from typing import Annotated
 
 import polars as pl
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel, ConfigDict
 
 METADATA = Path("data/raw/Paipu_deduplicated_metadata.tsv")
@@ -14,6 +15,7 @@ SAMPLES: pl.DataFrame
 POINTS: pl.DataFrame | None = None
 VARIANCE: list[float] = []
 EXTENT: dict[str, list[float]] = {}
+TOP: dict[str, list[str]] = {}
 PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
@@ -63,7 +65,13 @@ class Coverage(BaseModel):
 class PcaPoint(BaseModel):
     run_accession: str
     species: str
+    system: str
     cancer: str
+    subtype: str
+    tissue: str
+    sex: str
+    assay: str
+    clade: str
     study: str
     pc1: float
     pc2: float
@@ -76,12 +84,13 @@ class PcaView(BaseModel):
     points: list[PcaPoint]
     variance: list[float]
     extent: dict[str, list[float]]
+    top: dict[str, list[str]]
     excluded: int
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES, POINTS, VARIANCE, EXTENT
+    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
@@ -89,24 +98,23 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         null_values=["NA"],
     )
     if (DERIVED / "pca.parquet").exists():
-        POINTS = SAMPLES.select(
-            "run_accession",
-            species=FACET_COLUMNS["species"],
-            cancer=FACET_COLUMNS["cancer"],
-            study="bioproject",
-        ).join(pl.read_parquet(DERIVED / "pca.parquet"), on="run_accession", how="left")
+        POINTS = SAMPLES.select("run_accession", study="bioproject", **FACET_COLUMNS).join(
+            pl.read_parquet(DERIVED / "pca.parquet"), on="run_accession", how="left"
+        )
         manifest = json.loads((DERIVED / "manifest.json").read_text())
         VARIANCE = manifest["pca"]["explained_variance_ratio"]
         placed = POINTS.drop_nulls("pc1")
         low = placed.select(pl.col(PCS).min()).row(0)
         high = placed.select(pl.col(PCS).max()).row(0)
         EXTENT = {pc: [round(a, 2), round(b, 2)] for pc, a, b in zip(PCS, low, high, strict=True)}
+        TOP = {facet: leading(placed, facet) for facet in FACET_COLUMNS}
     yield
 
 
 app = FastAPI(
     title="CancerLike", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=1)
 
 
 def matching(filters: CohortFilter, skip: str | None = None) -> pl.Series:
@@ -133,6 +141,11 @@ def facet_counts(filters: CohortFilter) -> dict[str, dict[str, int]]:
 def by_size(cells: pl.DataFrame, axis: str) -> list[str]:
     totals = cells.group_by(axis).agg(pl.col("atlas").sum())
     return totals.sort("atlas", axis, descending=[True, False])[axis].to_list()
+
+
+def leading(placed: pl.DataFrame, facet: str) -> list[str]:
+    counts = placed[facet].value_counts().sort("count", facet, descending=[True, False])
+    return counts[facet].head(3).to_list()
 
 
 @app.get("/api/health")
@@ -179,5 +192,6 @@ def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
         points=[PcaPoint(**point) for point in rounded.to_dicts()],
         variance=VARIANCE,
         extent=EXTENT,
+        top=TOP,
         excluded=rows.height - placed.height,
     )
