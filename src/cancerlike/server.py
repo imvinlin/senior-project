@@ -16,6 +16,7 @@ POINTS: pl.DataFrame | None = None
 VARIANCE: list[float] = []
 EXTENT: dict[str, list[float]] = {}
 TOP: dict[str, list[str]] = {}
+LOADINGS: dict[str, dict[str, list["GeneWeight"]]] = {}
 PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
@@ -80,6 +81,11 @@ class PcaPoint(BaseModel):
     pc5: float
 
 
+class GeneWeight(BaseModel):
+    gene: str
+    weight: float
+
+
 class PcaView(BaseModel):
     points: list[PcaPoint]
     variance: list[float]
@@ -90,7 +96,7 @@ class PcaView(BaseModel):
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP
+    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
@@ -108,6 +114,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         high = placed.select(pl.col(PCS).max()).row(0)
         EXTENT = {pc: [round(a, 2), round(b, 2)] for pc, a, b in zip(PCS, low, high, strict=True)}
         TOP = {facet: leading(placed, facet) for facet in FACET_COLUMNS}
+        LOADINGS = {pc: extremes(pl.read_parquet(DERIVED / "loadings.parquet"), pc) for pc in PCS}
     yield
 
 
@@ -146,6 +153,14 @@ def by_size(cells: pl.DataFrame, axis: str) -> list[str]:
 def leading(placed: pl.DataFrame, facet: str) -> list[str]:
     counts = placed[facet].value_counts().sort("count", facet, descending=[True, False])
     return counts[facet].head(3).to_list()
+
+
+def extremes(loadings: pl.DataFrame, pc: str, n: int = 20) -> dict[str, list[GeneWeight]]:
+    ranked = loadings.select("gene", weight=pl.col(pc).cast(pl.Float64).round(4)).sort("weight")
+    return {
+        "high": [GeneWeight(**row) for row in ranked.tail(n).reverse().to_dicts()],
+        "low": [GeneWeight(**row) for row in ranked.head(n).to_dicts()],
+    }
 
 
 @app.get("/api/health")
@@ -195,3 +210,10 @@ def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
         top=TOP,
         excluded=rows.height - placed.height,
     )
+
+
+@app.get("/api/loadings")
+def loadings() -> dict[str, dict[str, list[GeneWeight]]]:
+    if not LOADINGS:
+        raise HTTPException(status_code=503, detail="no loadings, run make prep first")
+    return LOADINGS

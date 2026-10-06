@@ -3,13 +3,14 @@
 import { Suspense } from "react";
 
 import { CohortShell, loading } from "@/components/CohortShell";
-import { PcaPlot, type PcaView } from "@/components/PcaPlot";
+import { PcaPlot, type Loadings, type PcaView } from "@/components/PcaPlot";
 import { useApi } from "@/lib/useApi";
 import { useCohort } from "@/lib/useCohort";
 
 function PcaExplorer() {
   const state = useCohort();
   const { data, error } = useApi<PcaView>(`/api/pca?${state.filters.toString()}`);
+  const loadings = useApi<Loadings>("/api/loadings");
   return (
     <CohortShell state={state}>
       <h2 className="mt-8 text-sm font-medium text-zinc-700">Principal components of bulk expression</h2>
@@ -19,7 +20,7 @@ function PcaExplorer() {
           {error.endsWith("503") && ". Run make prep to compute the coordinates."}
         </p>
       )}
-      {data && state.cohort && <PcaPlot view={data} n={state.cohort.n} />}
+      {data && state.cohort && <PcaPlot view={data} n={state.cohort.n} loadings={loadings.data} />}
     </CohortShell>
   );
 }

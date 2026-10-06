@@ -7,6 +7,7 @@ const FACETS = ["species", "system", "cancer", "subtype", "tissue", "sex", "assa
 type Axis = (typeof AXES)[number];
 type Facet = (typeof FACETS)[number];
 type Point = { run_accession: string; study: string } & Record<Facet, string> & Record<Axis, number>;
+export type Loadings = Record<string, { high: { gene: string; weight: number }[]; low: { gene: string; weight: number }[] }>;
 export type PcaView = {
   points: Point[];
   variance: number[];
@@ -21,6 +22,7 @@ const SERIES = [
   { dot: "fill-series-3", swatch: "bg-series-3" },
 ];
 const OTHER = { dot: "fill-zinc-400", swatch: "bg-zinc-400" };
+const GENES = 12;
 const W = 760;
 const H = 520;
 const PAD = { left: 56, right: 16, top: 16, bottom: 48 };
@@ -54,7 +56,31 @@ function downloadCsv(points: Point[]) {
   URL.revokeObjectURL(link.href);
 }
 
-export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
+function GeneList({ title, genes }: { title: string; genes: { gene: string; weight: number }[] }) {
+  return (
+    <div>
+      <h4 className="text-xs font-medium text-zinc-500">{title}</h4>
+      <ul className="mt-1 font-mono text-xs">
+        {genes.slice(0, GENES).map(({ gene, weight }) => (
+          <li key={gene} className="flex justify-between gap-3">
+            <span>{gene}</span>
+            <span className="text-zinc-500">{weight.toFixed(3)}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+export function PcaPlot({
+  view,
+  n,
+  loadings,
+}: {
+  view: PcaView;
+  n: number;
+  loadings: Loadings | null;
+}) {
   const [hover, setHover] = useState<Point | null>(null);
   const [xAxis, setXAxis] = useState<Axis>("pc1");
   const [yAxis, setYAxis] = useState<Axis>("pc2");
@@ -245,6 +271,23 @@ export function PcaPlot({ view, n }: { view: PcaView; n: number }) {
           )}
         </div>
       </div>
+      {loadings && (
+        <div className="mt-6">
+          <h3 className="text-sm font-medium text-zinc-700">Genes that drive each axis</h3>
+          <p className="mt-1 text-sm text-zinc-600">
+            Each gene&apos;s weight on the component, from the global fit. A sample moves toward the
+            positive end as the high genes rise and the low genes fall.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-8">
+            {[xAxis, yAxis].map((axis) => (
+              <div key={axis} className="flex gap-6">
+                <GeneList title={`${axis.toUpperCase()} high`} genes={loadings[axis]?.high ?? []} />
+                <GeneList title={`${axis.toUpperCase()} low`} genes={loadings[axis]?.low ?? []} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

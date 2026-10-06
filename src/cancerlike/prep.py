@@ -23,15 +23,20 @@ def md5(path: Path) -> str:
     return digest.hexdigest()
 
 
-def pca(matrix: NDArray[np.float64], k: int) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+Arrays = tuple[NDArray[np.float64], NDArray[np.float64], NDArray[np.float64]]
+
+
+def pca(matrix: NDArray[np.float64], k: int) -> Arrays:
     # used sample space gram matrix because 3,484 (sample) vs ~20k (feature)
     centered = matrix - matrix.mean(axis=0)
     values, vectors = np.linalg.eigh(centered @ centered.T)
     values = values.clip(min=0)
     order = np.argsort(values)[::-1][:k]
-    coords = vectors[:, order] * np.sqrt(values[order])
+    scale = np.sqrt(values[order])
+    coords = vectors[:, order] * scale
     signs = np.sign(coords[np.abs(coords).argmax(axis=0), np.arange(k)])
-    return coords * signs, values[order] / values.sum()
+    loadings = centered.T @ vectors[:, order] / scale
+    return coords * signs, loadings * signs, values[order] / values.sum()
 
 
 def run() -> None:
@@ -39,11 +44,14 @@ def run() -> None:
     bulk = samples.filter(pl.col(FACET_COLUMNS["assay"]) == "bulk")["run_accession"].to_list()
     expression = pl.read_csv(EXPRESSION, separator="\t", columns=["Genes", *bulk])
     matrix = expression.select(bulk).to_numpy().T
-    coords, ratio = pca(matrix, COMPONENTS)
+    coords, loadings, ratio = pca(matrix, COMPONENTS)
 
     DERIVED.mkdir(parents=True, exist_ok=True)
     columns = {f"pc{i + 1}": coords[:, i].astype(np.float32) for i in range(COMPONENTS)}
     pl.DataFrame({"run_accession": bulk, **columns}).write_parquet(DERIVED / "pca.parquet")
+    weights = {f"pc{i + 1}": loadings[:, i].astype(np.float32) for i in range(COMPONENTS)}
+    genes = expression["Genes"].to_list()
+    pl.DataFrame({"gene": genes, **weights}).write_parquet(DERIVED / "loadings.parquet")
     manifest = {
         "source": {
             "doi": SOURCE_DOI,
@@ -61,4 +69,4 @@ def run() -> None:
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     (DERIVED / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"wrote {DERIVED}/pca.parquet ({len(bulk)} samples) and manifest.json")
+    print(f"wrote {DERIVED}/pca.parquet ({len(bulk)} samples), loadings.parquet, manifest.json")
