@@ -105,7 +105,7 @@ def diff_exp(
     ).sort_values("padj", kind="stable")
 
 
-def generate_pca_data(expression: pd.DataFrame, metadata: pd.DataFrame, group_field: str, output: Path) -> pd.DataFrame:
+def generate_pca_df(expression: pd.DataFrame, metadata: pd.DataFrame, group_field: str) -> pd.DataFrame:
     """PCA of samples, using variable genes and row-wise gene standardization."""
     values = expression.to_numpy(dtype=float)
     variances = np.nanvar(values, axis=1)
@@ -127,6 +127,41 @@ def generate_pca_data(expression: pd.DataFrame, metadata: pd.DataFrame, group_fi
     # fig.tight_layout()
     # fig.savefig(output, dpi=180)
     # plt.close(fig)
+
+
+# TODO: filter for significance in gene expression (comparison vs. reference level)
+def generate_heatmap_df(
+    expression: pd.DataFrame,
+    metadata: pd.DataFrame,
+    group_field: str,
+    result: pd.DataFrame,
+    top_n: int = 50,
+) -> tuple[pd.DataFrame, pd.Series]:
+    genes = result.head(top_n)["gene"].tolist()
+    # keep up to 40 samples (columns) per group
+    chosen: list[str] = []
+    for _, ids in metadata.groupby(group_field, dropna=False, sort=True).groups.items():
+        chosen.extend(list(ids)[:40])
+    chosen = [sample for sample in expression.columns if sample in set(chosen)]
+    values = expression.loc[genes, chosen]
+    # Z-score each gene for visualization only
+    # do not use this matrix for tests
+    z = values.sub(values.mean(axis=1), axis=0).div(
+        values.std(axis=1).replace(0, np.nan), axis=0)
+    groups = metadata.loc[z.columns, group_field].fillna("Unknown").astype(str)
+
+    return z, groups
+    # levels = groups.unique().tolist()
+    # palette = dict(zip(levels, sns.color_palette("husl", n_colors=len(levels)), strict=True))
+    # col_colors = groups.map(palette)
+    # height = max(7, min(18, 0.18 * len(genes) + 3))
+    # grid = sns.clustermap(
+    #     z.fillna(0), cmap="vlag", center=0, col_colors=col_colors, yticklabels=True,
+    #     xticklabels=False, figsize=(14, height),
+    # )
+    # grid.figure.suptitle(f"Top {len(genes)} differential genes (row z-score)", y=1.02)
+    # grid.savefig(output, dpi=180, bbox_inches="tight")
+    # plt.close(grid.figure)
 
 
 def main() -> int:
