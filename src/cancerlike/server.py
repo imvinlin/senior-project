@@ -1,18 +1,36 @@
+import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import polars as pl
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.gzip import GZipMiddleware
+from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 
+from cancerlike.pca import pca as decompose
+
 METADATA = Path("data/raw/Paipu_deduplicated_metadata.tsv")
+DERIVED = Path("data/derived")
 SAMPLES: pl.DataFrame
+POINTS: pl.DataFrame | None = None
+VARIANCE: list[float] = []
+EXTENT: dict[str, list[float]] = {}
+TOP: dict[str, list[str]] = {}
+LOADINGS: dict[str, dict[str, list["GeneWeight"]]] = {}
+GENES: list[str] = []
+EXPRESSION: NDArray[np.float32] | None = None
+COLUMN: dict[str, int] = {}
+MIN_FIT = 10
+PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
-    "cancer": "paipu_cancer_type_final",
     "system": "paipu_cancer_system",
+    "cancer": "paipu_cancer_type_final",
+    "subtype": "paipu_cancer_type",
     "tissue": "paipu_tissue_final",
     "sex": "paipu_sex_final",
     "assay": "single_bulk",
@@ -25,8 +43,9 @@ class CohortFilter(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     species: list[str] = []
-    cancer: list[str] = []
     system: list[str] = []
+    cancer: list[str] = []
+    subtype: list[str] = []
     tissue: list[str] = []
     sex: list[str] = []
     assay: list[str] = []
@@ -52,21 +71,73 @@ class Coverage(BaseModel):
     cells: list[CoverageCell]
 
 
+class PcaPoint(BaseModel):
+    run_accession: str
+    species: str
+    system: str
+    cancer: str
+    subtype: str
+    tissue: str
+    sex: str
+    assay: str
+    clade: str
+    study: str
+    pc1: float
+    pc2: float
+    pc3: float
+    pc4: float
+    pc5: float
+
+
+class GeneWeight(BaseModel):
+    gene: str
+    weight: float
+
+
+class PcaView(BaseModel):
+    points: list[PcaPoint]
+    variance: list[float]
+    extent: dict[str, list[float]]
+    top: dict[str, list[str]]
+    excluded: int
+    fit: str
+    loadings: dict[str, dict[str, list[GeneWeight]]] | None = None
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES
+    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS, GENES, EXPRESSION, COLUMN
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
         infer_schema_length=0,
         null_values=["NA"],
     )
+    if (DERIVED / "pca.parquet").exists():
+        POINTS = SAMPLES.select("run_accession", study="bioproject", **FACET_COLUMNS).join(
+            pl.read_parquet(DERIVED / "pca.parquet"), on="run_accession", how="left"
+        )
+        manifest = json.loads((DERIVED / "manifest.json").read_text())
+        VARIANCE = manifest["pca"]["explained_variance_ratio"]
+        placed = POINTS.drop_nulls("pc1")
+        low = placed.select(pl.col(PCS).min()).row(0)
+        high = placed.select(pl.col(PCS).max()).row(0)
+        EXTENT = {pc: [round(a, 2), round(b, 2)] for pc, a, b in zip(PCS, low, high, strict=True)}
+        TOP = {facet: leading(placed, facet) for facet in FACET_COLUMNS}
+        weights = pl.read_parquet(DERIVED / "loadings.parquet")
+        LOADINGS = {pc: extremes(weights, pc) for pc in PCS}
+        GENES = weights["gene"].to_list()
+    if (DERIVED / "expression.npy").exists():
+        EXPRESSION = np.load(DERIVED / "expression.npy", mmap_mode="r")
+        ids = pl.read_parquet(DERIVED / "pca.parquet")["run_accession"]
+        COLUMN = {sample: i for i, sample in enumerate(ids)}
     yield
 
 
 app = FastAPI(
     title="CancerLike", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=1)
 
 
 def matching(filters: CohortFilter, skip: str | None = None) -> pl.Series:
@@ -93,6 +164,19 @@ def facet_counts(filters: CohortFilter) -> dict[str, dict[str, int]]:
 def by_size(cells: pl.DataFrame, axis: str) -> list[str]:
     totals = cells.group_by(axis).agg(pl.col("atlas").sum())
     return totals.sort("atlas", axis, descending=[True, False])[axis].to_list()
+
+
+def leading(placed: pl.DataFrame, facet: str) -> list[str]:
+    counts = placed[facet].value_counts().sort("count", facet, descending=[True, False])
+    return counts[facet].head(3).to_list()
+
+
+def extremes(loadings: pl.DataFrame, pc: str, n: int = 20) -> dict[str, list[GeneWeight]]:
+    ranked = loadings.select("gene", weight=pl.col(pc).cast(pl.Float64).round(4)).sort("weight")
+    return {
+        "high": [GeneWeight(**row) for row in ranked.tail(n).reverse().to_dicts()],
+        "low": [GeneWeight(**row) for row in ranked.head(n).to_dicts()],
+    }
 
 
 @app.get("/api/health")
@@ -125,3 +209,61 @@ def coverage(filters: Annotated[CohortFilter, Query()]) -> Coverage:
         cancers=by_size(cells, "cancer"),
         cells=[CoverageCell(**cell) for cell in cells.to_dicts()],
     )
+
+
+@app.get("/api/pca")
+def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
+    if POINTS is None:
+        raise HTTPException(status_code=503, detail="no pca coordinates, run make prep first")
+    rows = POINTS.filter(matching(filters))
+    placed = rows.drop_nulls("pc1")
+    fields = list(PcaPoint.model_fields)
+    rounded = placed.select(fields).with_columns(pl.col(PCS).cast(pl.Float64).round(2))
+    return PcaView(
+        points=[PcaPoint(**point) for point in rounded.to_dicts()],
+        variance=VARIANCE,
+        extent=EXTENT,
+        top=TOP,
+        excluded=rows.height - placed.height,
+        fit="global",
+    )
+
+
+@app.get("/api/pca/cohort")
+def pca_cohort(filters: Annotated[CohortFilter, Query()]) -> PcaView:
+    if EXPRESSION is None or POINTS is None:
+        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+    rows = POINTS.filter(matching(filters))
+    placed = rows.drop_nulls("pc1")
+    if placed.height < MIN_FIT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{placed.height} bulk samples is too few to decompose, {MIN_FIT} needed",
+        )
+    matrix = EXPRESSION[:, [COLUMN[s] for s in placed["run_accession"]]].T.astype(np.float64)
+    coords, weights, ratio = decompose(matrix, len(PCS))
+    refit = placed.with_columns(
+        **{pc: pl.Series(coords[:, i]).round(2) for i, pc in enumerate(PCS)}
+    )
+    loadings = pl.DataFrame({"gene": GENES, **{pc: weights[:, i] for i, pc in enumerate(PCS)}})
+    return PcaView(
+        points=[
+            PcaPoint(**point) for point in refit.select(list(PcaPoint.model_fields)).to_dicts()
+        ],
+        variance=[round(float(r), 4) for r in ratio],
+        extent={
+            pc: [round(float(coords[:, i].min()), 2), round(float(coords[:, i].max()), 2)]
+            for i, pc in enumerate(PCS)
+        },
+        top=TOP,
+        excluded=rows.height - placed.height,
+        fit="cohort",
+        loadings={pc: extremes(loadings, pc) for pc in PCS},
+    )
+
+
+@app.get("/api/loadings")
+def loadings() -> dict[str, dict[str, list[GeneWeight]]]:
+    if not LOADINGS:
+        raise HTTPException(status_code=503, detail="no loadings, run make prep first")
+    return LOADINGS

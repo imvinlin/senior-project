@@ -1,5 +1,5 @@
 UV ?= uv
-.PHONY: help sync lint rfix fmt check dev wcheck wdev 
+.PHONY: help sync prep lint rfix fmt check dev wcheck wdev 
 
 help: ## lists the targets 
 	@grep -E '^[a-zA-Z0-9_-]+:.*?##' $(MAKEFILE_LIST) | \
@@ -7,6 +7,9 @@ help: ## lists the targets
 
 sync: ## install the depndencies
 	$(UV) sync 
+
+prep: ## write data/derived (pca coordinates) from data/raw
+	$(UV) run cancerlike prep
 
 test: ## run the python tests 
 	$(UV) run pytest 
