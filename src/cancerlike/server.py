@@ -4,10 +4,14 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+import numpy as np
 import polars as pl
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.gzip import GZipMiddleware
+from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
+
+from cancerlike.pca import pca as decompose
 
 METADATA = Path("data/raw/Paipu_deduplicated_metadata.tsv")
 DERIVED = Path("data/derived")
@@ -17,6 +21,10 @@ VARIANCE: list[float] = []
 EXTENT: dict[str, list[float]] = {}
 TOP: dict[str, list[str]] = {}
 LOADINGS: dict[str, dict[str, list["GeneWeight"]]] = {}
+GENES: list[str] = []
+EXPRESSION: NDArray[np.float32] | None = None
+COLUMN: dict[str, int] = {}
+MIN_FIT = 10
 PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
@@ -92,11 +100,13 @@ class PcaView(BaseModel):
     extent: dict[str, list[float]]
     top: dict[str, list[str]]
     excluded: int
+    fit: str
+    loadings: dict[str, dict[str, list[GeneWeight]]] | None = None
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS
+    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS, GENES, EXPRESSION, COLUMN
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
@@ -114,7 +124,13 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         high = placed.select(pl.col(PCS).max()).row(0)
         EXTENT = {pc: [round(a, 2), round(b, 2)] for pc, a, b in zip(PCS, low, high, strict=True)}
         TOP = {facet: leading(placed, facet) for facet in FACET_COLUMNS}
-        LOADINGS = {pc: extremes(pl.read_parquet(DERIVED / "loadings.parquet"), pc) for pc in PCS}
+        weights = pl.read_parquet(DERIVED / "loadings.parquet")
+        LOADINGS = {pc: extremes(weights, pc) for pc in PCS}
+        GENES = weights["gene"].to_list()
+    if (DERIVED / "expression.npy").exists():
+        EXPRESSION = np.load(DERIVED / "expression.npy", mmap_mode="r")
+        ids = pl.read_parquet(DERIVED / "pca.parquet")["run_accession"]
+        COLUMN = {sample: i for i, sample in enumerate(ids)}
     yield
 
 
@@ -209,6 +225,40 @@ def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
         extent=EXTENT,
         top=TOP,
         excluded=rows.height - placed.height,
+        fit="global",
+    )
+
+
+@app.get("/api/pca/cohort")
+def pca_cohort(filters: Annotated[CohortFilter, Query()]) -> PcaView:
+    if EXPRESSION is None or POINTS is None:
+        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+    rows = POINTS.filter(matching(filters))
+    placed = rows.drop_nulls("pc1")
+    if placed.height < MIN_FIT:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{placed.height} bulk samples is too few to decompose, {MIN_FIT} needed",
+        )
+    matrix = EXPRESSION[:, [COLUMN[s] for s in placed["run_accession"]]].T.astype(np.float64)
+    coords, weights, ratio = decompose(matrix, len(PCS))
+    refit = placed.with_columns(
+        **{pc: pl.Series(coords[:, i]).round(2) for i, pc in enumerate(PCS)}
+    )
+    loadings = pl.DataFrame({"gene": GENES, **{pc: weights[:, i] for i, pc in enumerate(PCS)}})
+    return PcaView(
+        points=[
+            PcaPoint(**point) for point in refit.select(list(PcaPoint.model_fields)).to_dicts()
+        ],
+        variance=[round(float(r), 4) for r in ratio],
+        extent={
+            pc: [round(float(coords[:, i].min()), 2), round(float(coords[:, i].max()), 2)]
+            for i, pc in enumerate(PCS)
+        },
+        top=TOP,
+        excluded=rows.height - placed.height,
+        fit="cohort",
+        loadings={pc: extremes(loadings, pc) for pc in PCS},
     )
 
 

@@ -14,6 +14,8 @@ export type PcaView = {
   extent: Record<string, [number, number]>;
   top: Record<string, string[]>;
   excluded: number;
+  fit: "global" | "cohort";
+  loadings: Loadings | null;
 };
 
 const SERIES = [
@@ -86,7 +88,7 @@ export function PcaPlot({
   const [yAxis, setYAxis] = useState<Axis>("pc2");
   const [zoomed, setZoomed] = useState(false);
   const [colorBy, setColorBy] = useState<Facet>("species");
-  const { points, variance, extent, top, excluded } = view;
+  const { points, variance, extent, top, excluded, fit } = view;
   if (points.length === 0) {
     return (
       <p className="mt-2 text-sm text-zinc-500">
@@ -148,9 +150,11 @@ export function PcaPlot({
         {axisPicker(xAxis, setXAxis)}
         <span>Y</span>
         {axisPicker(yAxis, setYAxis)}
-        <button type="button" className={BUTTON} onClick={() => setZoomed(!zoomed)}>
-          {zoomed ? "Show full atlas" : "Zoom to cohort"}
-        </button>
+        {fit === "global" && (
+          <button type="button" className={BUTTON} onClick={() => setZoomed(!zoomed)}>
+            {zoomed ? "Show full atlas" : "Zoom to cohort"}
+          </button>
+        )}
         <span>Colour by</span>
         <select
           className={`${SELECT} capitalize`}
@@ -259,10 +263,17 @@ export function PcaPlot({
             {formatCount(points.length)} of {formatCount(n)} cohort samples are plotted. The other{" "}
             {formatCount(excluded)} are single-cell and have no coordinates.
           </p>
-          <p className="mt-2 text-zinc-600">
-            The embedding was fit once on all 3,089 bulk samples, so PC1 means the same thing for every
-            cohort. The frame is the whole atlas unless you zoom.
-          </p>
+          {fit === "global" ? (
+            <p className="mt-2 text-zinc-600">
+              The embedding was fit once on all 3,089 bulk samples, so PC1 means the same thing for
+              every cohort. The frame is the whole atlas unless you zoom.
+            </p>
+          ) : (
+            <p className="mt-2 text-zinc-600">
+              Fit on the {formatCount(points.length)} bulk samples in this cohort only. The axes and the
+              variance belong to this cohort and cannot be compared with another one.
+            </p>
+          )}
           {studies > 1 && (
             <p className="mt-2 text-amber-700">
               These samples come from {formatCount(studies)} studies. Clusters can reflect study as much
@@ -275,7 +286,7 @@ export function PcaPlot({
         <div className="mt-6">
           <h3 className="text-sm font-medium text-zinc-700">Genes that drive each axis</h3>
           <p className="mt-1 text-sm text-zinc-600">
-            Each gene&apos;s weight on the component, from the global fit. A sample moves toward the
+            Each gene&apos;s weight on the component, from the {fit} fit. A sample moves toward the
             positive end as the high genes rise and the low genes fall.
           </p>
           <div className="mt-3 flex flex-wrap gap-8">
