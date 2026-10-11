@@ -27,16 +27,18 @@ def load_samples(
         metadata_path: Path = METADATA_PATH,
         sample_id_column: str = "run_accession",
         extra_filters: dict[str, Sequence[str]] | None = None,
+        assay: str = "bulk",
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     metadata = pd.read_csv(metadata_path, sep="\t",
                            dtype=str, low_memory=False)
 
-    # filter for only bulk samples
+    # choose the assay before reading matching expression columns
     for field in (sample_id_column, "single_bulk"):
         if field not in metadata:
             raise ValueError(
                 f"Metadata does not contain required column {field!r}")
-    metadata = metadata.loc[metadata["single_bulk"].eq("bulk")]
+    assay_values = metadata["single_bulk"].astype("string").str.strip().str.casefold()
+    metadata = metadata.loc[assay_values.eq(assay.strip().casefold())]
 
     # apply all metadata filters before reading expression columns
     filters = dict(extra_filters or {})
