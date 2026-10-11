@@ -38,7 +38,7 @@ def load_samples(
                 f"Metadata does not contain required column {field!r}")
     metadata = metadata.loc[metadata["single_bulk"].eq("bulk")]
 
-    # Apply all metadata filters before reading expression columns.
+    # apply all metadata filters before reading expression columns
     filters = dict(extra_filters or {})
     if filter_field:
         filters[filter_field] = filter_vals
@@ -178,22 +178,27 @@ def generate_heatmap_df(
     groups_to_include: Sequence[str] | None = None,
 ) -> tuple[pd.DataFrame, pd.Series]:
     if group_field not in metadata:
-        raise ValueError(f"Metadata does not contain group column {group_field!r}")
+        raise ValueError(
+            f"Metadata does not contain group column {group_field!r}")
     if "gene" not in result:
-        raise ValueError("Differential-expression result must contain a 'gene' column")
+        raise ValueError(
+            "Differential-expression result must contain a 'gene' column")
     if top_n < 1 or max_samples_per_group < 1:
         raise ValueError("top_n and max_samples_per_group must be positive")
 
     genes = result.head(top_n)["gene"].tolist()
     display_metadata = metadata
     if groups_to_include is not None:
-        labels = metadata[group_field].astype("string").str.strip().str.casefold()
-        display_metadata = metadata.loc[labels.isin(folded_values(groups_to_include))]
+        labels = metadata[group_field].astype(
+            "string").str.strip().str.casefold()
+        display_metadata = metadata.loc[labels.isin(
+            folded_values(groups_to_include))]
 
     # Share the sample cap across case variants of the same group label.
     chosen: list[str] = []
     counts: dict[str, int] = {}
-    labels = display_metadata[group_field].astype("string").str.strip().str.casefold()
+    labels = display_metadata[group_field].astype(
+        "string").str.strip().str.casefold()
     for sample, label in labels.items():
         key = label if pd.notna(label) else "<missing>"
         if counts.get(key, 0) < max_samples_per_group:
@@ -206,7 +211,8 @@ def generate_heatmap_df(
     # do not use this matrix for tests
     z = values.sub(values.mean(axis=1), axis=0).div(
         values.std(axis=1).replace(0, np.nan), axis=0)
-    groups = display_metadata.loc[z.columns, group_field].fillna("Unknown").astype(str)
+    groups = display_metadata.loc[z.columns,
+                                  group_field].fillna("Unknown").astype(str)
 
     return z, groups
 
@@ -223,12 +229,14 @@ def run_analysis(
     min_replicates: int = 2,
     species: str | None = None,
 ) -> int:
-    extra_filters = {"organism_scientific_name": [species]} if species else None
+    extra_filters = {"organism_scientific_name": [
+        species]} if species else None
     expression, metadata = load_samples(
         filter_field, filter_values, extra_filters=extra_filters
     )
     if group_field not in metadata:
-        raise ValueError(f"Metadata does not contain group column {group_field!r}")
+        raise ValueError(
+            f"Metadata does not contain group column {group_field!r}")
     labels = metadata[group_field].fillna("Unknown")
     result = diff_exp(
         expression,
@@ -244,7 +252,8 @@ def run_analysis(
         result,
         top_n=top_genes,
         max_samples_per_group=max_samples_per_group,
-        groups_to_include=(*group_values(reference), *group_values(comparison)),
+        groups_to_include=(*group_values(reference),
+                           *group_values(comparison)),
     )
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -257,7 +266,8 @@ def run_analysis(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Compare two bulk sample groups")
+    parser = argparse.ArgumentParser(
+        description="Compare two bulk sample groups")
     parser.add_argument(
         "--filter-field", required=True, help="Metadata field used to select samples"
     )
@@ -278,7 +288,8 @@ def main() -> int:
         "--comparison", action="append", required=True,
         help="Comparison label; repeat to combine labels",
     )
-    parser.add_argument("--output-dir", type=Path, default=Path("data/analysis"))
+    parser.add_argument("--output-dir", type=Path,
+                        default=Path("data/analysis"))
     parser.add_argument("--top-genes", type=int, default=50)
     parser.add_argument("--max-samples-per-group", type=int, default=40)
     parser.add_argument("--min-replicates", type=int, default=2)
