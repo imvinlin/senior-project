@@ -73,6 +73,7 @@ def load_samples(
     return expression, metadata
 
 
+# compare groups with Welch's t-test and adjust p-values across genes
 def diff_exp(
         expression: pd.DataFrame,
         labels: pd.Series,
@@ -80,8 +81,7 @@ def diff_exp(
         comparison: str | Sequence[str],
         min_replicates: int = 2,
 ) -> pd.DataFrame:
-    """Compare groups with Welch's t-test and adjust p-values across genes."""
-    # Effects are comparison minus reference on the input expression scale.
+    # effects are comparison minus reference on the input expression scale
     reference_values = folded_values(reference)
     comparison_values = folded_values(comparison)
     if not reference_values or not comparison_values:
@@ -146,7 +146,7 @@ def _row_mean(values: np.ndarray) -> np.ndarray:
         totals,
         counts,
         out=np.full(values.shape[0], np.nan),
-        where=counts > 0,
+        where=counts > 0
     )
 
 
