@@ -150,8 +150,8 @@ def _row_mean(values: np.ndarray) -> np.ndarray:
     )
 
 
+# PCA of samples, using variable genes and row-wise gene standardization
 def generate_pca_df(expression: pd.DataFrame, metadata: pd.DataFrame, group_field: str) -> pd.DataFrame:
-    """PCA of samples, using variable genes and row-wise gene standardization."""
     values = expression.to_numpy(dtype=float)
     variances = np.nanvar(values, axis=1)
     n_genes = min(2000, int(np.isfinite(variances).sum()))
@@ -194,7 +194,7 @@ def generate_heatmap_df(
         display_metadata = metadata.loc[labels.isin(
             folded_values(groups_to_include))]
 
-    # Share the sample cap across case variants of the same group label.
+    # share the sample cap across case variants of the same group label
     chosen: list[str] = []
     counts: dict[str, int] = {}
     labels = display_metadata[group_field].astype(
