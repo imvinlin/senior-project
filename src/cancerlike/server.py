@@ -2,7 +2,7 @@ import json
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Literal
 
 import numpy as np
 import polars as pl
@@ -22,6 +22,7 @@ EXTENT: dict[str, list[float]] = {}
 TOP: dict[str, list[str]] = {}
 LOADINGS: dict[str, dict[str, list["GeneWeight"]]] = {}
 GENES: list[str] = []
+GENE_INDEX: dict[str, int] = {}
 EXPRESSION: NDArray[np.float32] | None = None
 COLUMN: dict[str, int] = {}
 MIN_FIT = 10
@@ -104,9 +105,35 @@ class PcaView(BaseModel):
     loadings: dict[str, dict[str, list[GeneWeight]]] | None = None
 
 
+class GenePoint(BaseModel):
+    run_accession: str
+    species: str
+    system: str
+    cancer: str
+    subtype: str
+    tissue: str
+    sex: str
+    assay: str
+    clade: str
+    study: str
+    x: float
+    y: float
+
+
+class GeneExpressionView(BaseModel):
+    points: list[GenePoint]
+    top: dict[str, list[str]]
+    excluded: int
+    total: int
+    scope: str
+    gene1: str
+    gene2: str
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
-    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS, GENES, EXPRESSION, COLUMN
+    global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS, GENES, GENE_INDEX
+    global EXPRESSION, COLUMN
     SAMPLES = pl.read_csv(
         METADATA,
         separator="\t",
@@ -127,6 +154,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         weights = pl.read_parquet(DERIVED / "loadings.parquet")
         LOADINGS = {pc: extremes(weights, pc) for pc in PCS}
         GENES = weights["gene"].to_list()
+        GENE_INDEX = {gene: index for index, gene in enumerate(GENES)}
     if (DERIVED / "expression.npy").exists():
         EXPRESSION = np.load(DERIVED / "expression.npy", mmap_mode="r")
         ids = pl.read_parquet(DERIVED / "pca.parquet")["run_accession"]
@@ -267,3 +295,74 @@ def loadings() -> dict[str, dict[str, list[GeneWeight]]]:
     if not LOADINGS:
         raise HTTPException(status_code=503, detail="no loadings, run make prep first")
     return LOADINGS
+
+
+@app.get("/api/genes")
+def search_genes(q: str = "", limit: int = 50) -> list[str]:
+    if EXPRESSION is None:
+        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+    query = q.casefold().strip()
+    matches = [gene for gene in GENES if query in gene.casefold()]
+    return matches[: max(1, min(limit, 50))]
+
+
+@app.get("/api/genes/expression")
+def gene_expression(
+    gene1: str,
+    gene2: str,
+    scope: Literal["global", "cohort"] = "global",
+    species: Annotated[list[str] | None, Query()] = None,
+    system: Annotated[list[str] | None, Query()] = None,
+    cancer: Annotated[list[str] | None, Query()] = None,
+    subtype: Annotated[list[str] | None, Query()] = None,
+    tissue: Annotated[list[str] | None, Query()] = None,
+    sex: Annotated[list[str] | None, Query()] = None,
+    assay: Annotated[list[str] | None, Query()] = None,
+    clade: Annotated[list[str] | None, Query()] = None,
+) -> GeneExpressionView:
+    if EXPRESSION is None:
+        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+    if gene1 not in GENE_INDEX or gene2 not in GENE_INDEX:
+        raise HTTPException(status_code=404, detail="gene not found")
+    filters = CohortFilter(
+        species=species or [], system=system or [], cancer=cancer or [], subtype=subtype or [],
+        tissue=tissue or [], sex=sex or [], assay=assay or [], clade=clade or [],
+    )
+    return expression_view(gene1, gene2, scope, filters)
+
+
+def expression_view(
+    gene1: str, gene2: str, scope: str, filters: CohortFilter
+) -> GeneExpressionView:
+    selected = SAMPLES.filter(matching(filters) if scope == "cohort" else pl.lit(True))
+    bulk = selected.filter(pl.col("run_accession").is_in(COLUMN))
+    samples = bulk.select("run_accession", "bioproject", *FACET_COLUMNS.values()).to_dicts()
+    x_index, y_index = GENE_INDEX[gene1], GENE_INDEX[gene2]
+    points = [
+        GenePoint(
+            run_accession=row["run_accession"],
+            study=row["bioproject"],
+            **{facet: row[column] for facet, column in FACET_COLUMNS.items()},
+            x=float(EXPRESSION[x_index, COLUMN[row["run_accession"]]]),
+            y=float(EXPRESSION[y_index, COLUMN[row["run_accession"]]]),
+        )
+        for row in samples
+    ]
+    return GeneExpressionView(
+        points=points,
+        top=top_facets(bulk),
+        excluded=selected.height - bulk.height,
+        total=selected.height,
+        scope=scope,
+        gene1=gene1,
+        gene2=gene2,
+    )
+
+
+def top_facets(bulk: pl.DataFrame) -> dict[str, list[str]]:
+    top: dict[str, list[str]] = {}
+    for facet, column in FACET_COLUMNS.items():
+        counts = bulk[column].drop_nulls().value_counts()
+        counts = counts.sort("count", column, descending=[True, False])
+        top[facet] = counts[column].head(3).to_list()
+    return top
