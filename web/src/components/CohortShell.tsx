@@ -10,6 +10,7 @@ import type { CohortState } from "@/lib/useCohort";
 const TABS = [
   { href: "/", label: "Cohort" },
   { href: "/pca", label: "PCA" },
+  { href: "/genes", label: "Gene Comparison" },
 ];
 
 export const loading = <main className="p-6 text-zinc-500">Loading...</main>;

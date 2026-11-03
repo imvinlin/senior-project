@@ -1,17 +1,20 @@
 import { useEffect, useState } from "react";
 
-export function useApi<T>(url: string) {
+export function useApi<T>(url: string, enabled = true) {
   const [data, setData] = useState<T | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
 
   useEffect(() => {
+    if (!enabled) return;
     let stale = false;
     fetch(url)
       .then(async (r) => {
         if (r.ok) return r.json() as Promise<T>;
-        const body = (await r.json().catch(() => null)) as { detail?: string } | null;
-        throw new Error(body?.detail ?? `API answered ${r.status}`);
+        const body = (await r.json().catch(() => null)) as { detail?: unknown } | null;
+        const detail = body?.detail;
+        const message = typeof detail === "string" ? detail : JSON.stringify(detail);
+        throw new Error(message || `API answered ${r.status}`);
       })
       .then((d) => {
         if (stale) return;
@@ -27,7 +30,11 @@ export function useApi<T>(url: string) {
     return () => {
       stale = true;
     };
-  }, [url]);
+  }, [url, enabled]);
 
-  return { data, error, pending: done !== url };
+  return {
+    data: enabled ? data : null,
+    error: enabled ? error : null,
+    pending: enabled && done !== url,
+  };
 }
