@@ -226,14 +226,28 @@ export function GeneComparison({
             <div className="relative max-w-full overflow-x-auto">
               <svg width={W} height={H} className="rounded border border-zinc-200"
                 onMouseMove={nearest} onMouseLeave={() => setHover(null)}>
-                <text x={(PAD.left + W - PAD.right) / 2} y={H - 12} textAnchor="middle" className="fill-zinc-600 text-xs">
-                  {view.gene1} expression
-                </text>
-                <text x={14} y={(PAD.top + H - PAD.bottom) / 2}
-                  transform={`rotate(-90 14 ${(PAD.top + H - PAD.bottom) / 2})`}
-                  textAnchor="middle" className="fill-zinc-600 text-xs">
-                  {view.gene2} expression
-                </text>
+                <a
+                  href={`https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/1/?search=${encodeURIComponent(view.gene1)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Search NCBI Gene for ${view.gene1}`}
+                >
+                  <text x={(PAD.left + W - PAD.right) / 2} y={H - 12} textAnchor="middle" className="fill-zinc-600 text-xs cursor-pointer">
+                    {view.gene1} expression
+                  </text>
+                </a>
+                <a
+                  href={`https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/1/?search=${encodeURIComponent(view.gene2)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={`Search NCBI Gene for ${view.gene2}`}
+                >
+                  <text x={14} y={(PAD.top + H - PAD.bottom) / 2}
+                    transform={`rotate(-90 14 ${(PAD.top + H - PAD.bottom) / 2})`}
+                    textAnchor="middle" className="fill-zinc-600 text-xs cursor-pointer">
+                    {view.gene2} expression
+                  </text>
+                </a>
                 {ordered.map((point) => (
                   <circle key={point.run_accession} cx={x(point.x)} cy={y(point.y)} r={3}
                     fillOpacity={0.7} strokeWidth={0.6} className={`${series(point).dot} stroke-white`} />

@@ -66,7 +66,6 @@ function GeneList({ title, genes }: { title: string; genes: { gene: string; weig
         {genes.slice(0, GENES).map(({ gene, weight }) => (
           <li key={gene} className="flex justify-between gap-3">
             <a
-              // href={`https://www.ncbi.nlm.nih.gov/gene/?term=${encodeURIComponent(gene)}`}
               href={`https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/1/?search=${encodeURIComponent(gene)}`}
               target="_blank"
               rel="noopener noreferrer"
