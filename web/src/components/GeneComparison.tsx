@@ -35,6 +35,28 @@ function scale(values: number[], from: number, to: number) {
   return (value: number) => from + ((value - low) / span) * (to - from);
 }
 
+function axisTicks(values: number[]) {
+  const dataLow = values.length ? Math.min(...values) : 0;
+  const dataHigh = values.length ? Math.max(...values) : 1;
+  const spread = dataHigh - dataLow || Math.max(Math.abs(dataLow) * 0.2, 1);
+  const roughStep = spread / 5;
+  const magnitude = 10 ** Math.floor(Math.log10(roughStep));
+  const fraction = roughStep / magnitude;
+  const step = (fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10) * magnitude;
+  let low = Math.min(0, Math.floor(dataLow / step) * step);
+  let high = Math.max(0, Math.ceil(dataHigh / step) * step);
+  if (low === high) {
+    low -= step;
+    high += step;
+  }
+  const decimals = Math.max(0, Math.min(6, -Math.floor(Math.log10(step))));
+  const ticks = Array.from(
+    { length: Math.round((high - low) / step) + 1 },
+    (_, index) => Number((low + index * step).toFixed(decimals)),
+  );
+  return { low, high, ticks, decimals };
+}
+
 function csvValue(value: string | number) {
   return typeof value === "number" ? String(value) : `"${value.replaceAll('"', '""')}"`;
 }
@@ -142,8 +164,15 @@ export function GeneComparison({
   const [colorBy, setColorBy] = useState<Facet>("species");
   const [hover, setHover] = useState<Point | null>(null);
   const points = view?.points ?? [];
-  const x = scale(points.map((point) => point.x), PAD.left + 8, W - PAD.right - 8);
-  const y = scale(points.map((point) => point.y), H - PAD.bottom - 8, PAD.top + 8);
+  const xAxis = axisTicks(points.map((point) => point.x));
+  const yAxis = axisTicks(points.map((point) => point.y));
+  const x = scale([xAxis.low, xAxis.high], PAD.left + 8, W - PAD.right - 8);
+  const y = scale([yAxis.low, yAxis.high], H - PAD.bottom - 8, PAD.top + 8);
+  const plotLeft = PAD.left + 8;
+  const plotRight = W - PAD.right - 8;
+  const plotTop = PAD.top + 8;
+  const plotBottom = H - PAD.bottom - 8;
+  const tickLabel = (value: number, decimals: number) => value.toFixed(decimals);
   const top = view?.top[colorBy] ?? [];
   const series = (point: Point) => SERIES[top.indexOf(point[colorBy])] ?? OTHER;
   const counts = new Map<string, number>();
@@ -248,6 +277,30 @@ export function GeneComparison({
                     {view.gene2} expression
                   </text>
                 </a>
+                {xAxis.ticks.map((tick) => (
+                  <line key={`x-grid-${tick}`} x1={x(tick)} y1={plotTop} x2={x(tick)} y2={plotBottom} className="stroke-zinc-100" />
+                ))}
+                {yAxis.ticks.map((tick) => (
+                  <line key={`y-grid-${tick}`} x1={plotLeft} y1={y(tick)} x2={plotRight} y2={y(tick)} className="stroke-zinc-100" />
+                ))}
+                <line x1={x(0)} y1={plotTop} x2={x(0)} y2={plotBottom} className="stroke-zinc-500" />
+                <line x1={plotLeft} y1={y(0)} x2={plotRight} y2={y(0)} className="stroke-zinc-500" />
+                {xAxis.ticks.map((tick) => (
+                  <g key={`x-${tick}`}>
+                    <line x1={x(tick)} y1={y(0) - 3} x2={x(tick)} y2={y(0) + 3} className="stroke-zinc-500" />
+                    <text x={x(tick)} y={y(0) + 15} textAnchor="middle" className="fill-zinc-500 text-[10px]">
+                      {tickLabel(tick, xAxis.decimals)}
+                    </text>
+                  </g>
+                ))}
+                {yAxis.ticks.map((tick) => (
+                  <g key={`y-${tick}`}>
+                    <line x1={x(0) - 3} y1={y(tick)} x2={x(0) + 3} y2={y(tick)} className="stroke-zinc-500" />
+                    <text x={x(0) - 7} y={y(tick) + 3} textAnchor="end" className="fill-zinc-500 text-[10px]">
+                      {tickLabel(tick, yAxis.decimals)}
+                    </text>
+                  </g>
+                ))}
                 {ordered.map((point) => (
                   <circle key={point.run_accession} cx={x(point.x)} cy={y(point.y)} r={3}
                     fillOpacity={0.7} strokeWidth={0.6} className={`${series(point).dot} stroke-white`} />
