@@ -65,7 +65,15 @@ function GeneList({ title, genes }: { title: string; genes: { gene: string; weig
       <ul className="mt-1 font-mono text-xs">
         {genes.slice(0, GENES).map(({ gene, weight }) => (
           <li key={gene} className="flex justify-between gap-3">
-            <span>{gene}</span>
+            <a
+              href={`https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/1/?search=${encodeURIComponent(gene)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-accent underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-accent"
+              title={`Search NCBI Gene for ${gene}`}
+            >
+              {gene}
+            </a>
             <span className="text-zinc-500">{weight.toFixed(3)}</span>
           </li>
         ))}
