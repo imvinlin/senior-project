@@ -41,16 +41,25 @@ memory; the API bundle should contain only the prepared expression matrix
 (about 118 MB), metadata, PCA coordinates, loadings, and runtime dependencies.
 
 Create the API project first, using the repository root as its project root and
-the FastAPI framework preset. `vercel.json` configures the app entry point,
-build preparation, included data files, and a 300-second function duration.
-Keep the source files publicly readable in Drive so each deployment can fetch
-them. The initial API build may take several minutes while it downloads and
-processes the expression matrix.
+the FastAPI framework preset. In that API project's Build & Development
+Settings, override the Build Command with:
+
+```sh
+uv run python deploy/vercel_prepare.py
+```
+
+The root `vercel.json` configures the app entry
+point, bundled data files, and a 300-second function duration. Keeping the
+preparation command in the API project's settings prevents it from running in
+the frontend project. Keep the source files publicly readable in Drive so each
+API deployment can fetch them. The initial API build may take several minutes
+while it downloads and processes the expression matrix.
 
 Then create a second Vercel project from the same repository with `web` as the
 project root. Set `CANCERLIKE_API` to the API project's production URL, without
 a trailing slash, for Production and Preview. The existing Next.js rewrite
-forwards `/api/*` requests to that project.
+forwards `/api/*` requests to that project. Leave the frontend project's Build
+Command, Install Command, and Output Directory at their Next.js defaults.
 
 Vercel Hobby is free for personal, noncommercial use, subject to its usage
 limits. The Python bundle size, memory, and request duration should be checked
