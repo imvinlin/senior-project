@@ -16,11 +16,17 @@ FILES = {
 
 def main() -> None:
     RAW_DIR.mkdir(parents=True, exist_ok=True)
+    downloaded_expression = False
     for name, default_id in FILES.items():
         kind = "METADATA" if "metadata" in name else "EXPRESSION"
         file_id = os.environ.get(f"DRIVE_{kind}_FILE_ID", default_id)
         destination = RAW_DIR / name
-        gdown.download(f"https://drive.google.com/uc?id={file_id}", str(destination), quiet=False)
+        if not destination.is_file() or destination.stat().st_size == 0:
+            gdown.download(
+                f"https://drive.google.com/uc?id={file_id}", str(destination), quiet=False
+            )
+            if name == "Paipu_deduplicated_expression.tsv":
+                downloaded_expression = True
         if not destination.is_file() or destination.stat().st_size == 0:
             raise RuntimeError(f"Google Drive download did not produce {destination}")
 
@@ -32,6 +38,9 @@ def main() -> None:
     from cancerlike.prep import run
 
     run()
+    # The runtime uses the prepared NumPy matrix, not the raw 622 MB TSV.
+    if downloaded_expression:
+        (RAW_DIR / "Paipu_deduplicated_expression.tsv").unlink()
 
 
 if __name__ == "__main__":

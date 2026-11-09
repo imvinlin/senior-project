@@ -1,9 +1,9 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "functions": {
-    "src/cancerlike/server.py": {
-      "includeFiles": "data/**",
-      "excludeFiles": "data/raw/Paipu_deduplicated_expression.tsv",
+    "server.py": {
+      "includeFiles": "{src/cancerlike/**,data/raw/Paipu_deduplicated_metadata.tsv,data/derived/**}",
+      "excludeFiles": "{.venv/**,deploy/**,data/raw/Paipu_deduplicated_expression.tsv}",
       "maxDuration": 300
     }
   }

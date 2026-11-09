@@ -8,7 +8,6 @@ dependencies = [
   "uvicorn[standard]>=0.30",
   "polars>=1.0",
   "numpy>=2",
-  "gdown>=5.2",
 ]
 
 [project.optional-dependencies]
@@ -22,7 +21,7 @@ analysis = [
 cancerlike = "cancerlike.cli:main"
 
 [tool.vercel]
-entrypoint = "cancerlike.server:app"
+entrypoint = "server:app"
 
 [build-system]
 requires = ["hatchling"]
