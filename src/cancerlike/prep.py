@@ -1,5 +1,6 @@
 import hashlib
 import json
+import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -9,8 +10,11 @@ import polars as pl
 from cancerlike.pca import pca
 from cancerlike.server import FACET_COLUMNS, METADATA
 
-EXPRESSION = Path("data/raw/Paipu_deduplicated_expression.tsv")
-DERIVED = Path("data/derived")
+DATA_DIR = Path(
+    os.environ.get("CANCERLIKE_DATA_DIR", str(Path(__file__).resolve().parents[2] / "data"))
+)
+EXPRESSION = DATA_DIR / "raw/Paipu_deduplicated_expression.tsv"
+DERIVED = DATA_DIR / "derived"
 COMPONENTS = 5
 SOURCE_DOI = "10.5281/zenodo.19904328"
 

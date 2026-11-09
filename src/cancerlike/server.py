@@ -1,4 +1,5 @@
 import json
+import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,8 +14,11 @@ from pydantic import BaseModel, ConfigDict
 
 from cancerlike.pca import pca as decompose
 
-METADATA = Path("data/raw/Paipu_deduplicated_metadata.tsv")
-DERIVED = Path("data/derived")
+DATA_DIR = Path(
+    os.environ.get("CANCERLIKE_DATA_DIR", str(Path(__file__).resolve().parents[2] / "data"))
+)
+METADATA = DATA_DIR / "raw/Paipu_deduplicated_metadata.tsv"
+DERIVED = DATA_DIR / "derived"
 SAMPLES: pl.DataFrame
 POINTS: pl.DataFrame | None = None
 VARIANCE: list[float] = []
