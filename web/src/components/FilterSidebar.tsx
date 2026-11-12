@@ -28,7 +28,7 @@ export function FilterSidebar({
         </button>
       </div>
       {Object.entries(facets).map(([facet, counts]) => (
-        <FacetGroup
+        <FilterFacetGroup
           key={facet}
           name={facet}
           counts={counts}
@@ -40,7 +40,7 @@ export function FilterSidebar({
   );
 }
 
-function FacetGroup({
+export function FilterFacetGroup({
   name,
   counts,
   picked,

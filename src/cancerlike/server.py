@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -7,8 +8,9 @@ from typing import Annotated, Literal
 
 import numpy as np
 import polars as pl
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import JSONResponse
 from numpy.typing import NDArray
 from pydantic import BaseModel, ConfigDict
 
@@ -134,6 +136,27 @@ class GeneExpressionView(BaseModel):
     gene2: str
 
 
+class DifferentialExpressionRequest(BaseModel):
+    cohort1: CohortFilter
+    cohort2: CohortFilter
+    top_genes: int = 50
+
+
+class DifferentialExpressionResponse(BaseModel):
+    cohort1_n: int
+    cohort2_n: int
+    genes: list[dict[str, str | float | None]]
+    heatmap_genes: list[str]
+    heatmap_samples: list[str]
+    heatmap_values: list[list[float | None]]
+    heatmap_groups: list[str]
+    all_heatmap_samples: list[str]
+    all_heatmap_values: list[list[float | None]]
+    all_heatmap_groups: list[str]
+    pca: list[dict[str, str | float]]
+    pca_variance: list[float]
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     global SAMPLES, POINTS, VARIANCE, EXTENT, TOP, LOADINGS, GENES, GENE_INDEX
@@ -170,6 +193,26 @@ app = FastAPI(
     title="CancerLike", docs_url="/api/docs", openapi_url="/api/openapi.json", lifespan=lifespan
 )
 app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=1)
+logger = logging.getLogger(__name__)
+
+
+@app.exception_handler(Exception)
+async def unhandled_error(request: Request, error: Exception) -> JSONResponse:
+    logger.error(
+        "Unhandled API error for %s %s",
+        request.method,
+        request.url.path,
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return JSONResponse(
+        status_code=500,
+        content={
+            "detail": (
+                "Internal API error ("
+                f"{type(error).__name__}). Check the server function logs for details."
+            )
+        },
+    )
 
 
 def matching(filters: CohortFilter, skip: str | None = None) -> pl.Series:
@@ -223,6 +266,157 @@ def cohort(filters: Annotated[CohortFilter, Query()]) -> CohortSummary:
         n=int(keep.sum()),
         facets=facet_counts(filters),
         sex_label_confidence=tally(SEX_LABEL_CONFIDENCE, keep),
+    )
+
+
+@app.get("/api/differential-expression/options")
+def differential_expression_options() -> dict[str, dict[str, int]]:
+    keep = SAMPLES["run_accession"].is_in(list(COLUMN))
+    return {
+        field: tally(column, keep)
+        for field, column in FACET_COLUMNS.items()
+    }
+
+
+def differential_expression_sample_ids(filters: CohortFilter) -> list[str]:
+    """Return selected samples with the bulk expression and PCA data used here."""
+    return (
+        SAMPLES.filter(matching(filters))
+        .filter(pl.col("run_accession").is_in(list(COLUMN)))
+        .get_column("run_accession")
+        .to_list()
+    )
+
+
+@app.post("/api/differential-expression/cohorts")
+def differential_expression_cohorts(
+    request: DifferentialExpressionRequest,
+) -> dict[str, int | bool]:
+    ids1 = set(differential_expression_sample_ids(request.cohort1))
+    ids2 = set(differential_expression_sample_ids(request.cohort2))
+    return {
+        "cohort1_n": len(ids1),
+        "cohort2_n": len(ids2),
+        "identical": ids1 == ids2,
+        "overlap": len(ids1 & ids2),
+    }
+
+
+@app.post("/api/differential-expression")
+def differential_expression(
+    request: DifferentialExpressionRequest,
+) -> DifferentialExpressionResponse:
+    if POINTS is None or EXPRESSION is None or not GENES:
+        raise HTTPException(
+            status_code=503,
+            detail="no prepared expression matrix or PCA coordinates, run make prep first",
+        )
+    ids1 = differential_expression_sample_ids(request.cohort1)
+    ids2 = differential_expression_sample_ids(request.cohort2)
+    overlap = set(ids1) & set(ids2)
+    if not ids1 or not ids2:
+        raise HTTPException(
+            status_code=422,
+            detail="Each cohort must contain bulk samples with expression data",
+        )
+    if overlap:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Cohorts share {len(overlap)} samples. "
+                "Adjust filters so the cohorts do not overlap."
+            ),
+        )
+    if request.top_genes < 1 or request.top_genes > 200:
+        raise HTTPException(status_code=422, detail="top_genes must be between 1 and 200")
+    try:
+        import pandas as pd
+
+        from analysis.diff_expression import diff_exp, generate_heatmap_df
+
+        sample_ids = ids1 + ids2
+        expression = pd.DataFrame(
+            EXPRESSION[:, [COLUMN[sample] for sample in sample_ids]],
+            index=GENES,
+            columns=sample_ids,
+        )
+        cohort1_ids = set(ids1)
+        labels = ["Reference" if sample in cohort1_ids else "Comparison" for sample in sample_ids]
+        label_series = pd.Series(labels, index=sample_ids)
+        results = diff_exp(expression, label_series, "Reference", "Comparison")
+        significant = results.loc[results["padj"] <= 0.05].copy()
+        metadata = pd.DataFrame({"cohort": label_series}, index=sample_ids)
+        heatmap, groups = generate_heatmap_df(
+            expression, metadata, "cohort", significant, top_n=request.top_genes,
+            max_samples_per_group=25, groups_to_include=["Reference", "Comparison"],
+        )
+        all_heatmap, all_groups = generate_heatmap_df(
+            expression,
+            metadata,
+            "cohort",
+            significant,
+            top_n=request.top_genes,
+            max_samples_per_group=len(sample_ids),
+            groups_to_include=["Reference", "Comparison"],
+        )
+    except ImportError as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Differential-expression dependencies unavailable: {error}",
+        ) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    # Refit the same unscaled, per-gene-centered PCA used by the PCA tab, on
+    # these selected samples only. The atlas coordinates are intentionally unused.
+    pca_matrix = EXPRESSION[:, [COLUMN[sample] for sample in sample_ids]].T.astype(np.float64)
+    pca_coords, _, pca_ratio = decompose(pca_matrix, 2)
+    pca_coords = np.nan_to_num(pca_coords, nan=0.0, posinf=0.0, neginf=0.0)
+    pca_ratio = np.nan_to_num(pca_ratio, nan=0.0, posinf=0.0, neginf=0.0)
+    sample_metadata = {
+        row["run_accession"]: row
+        for row in POINTS.filter(pl.col("run_accession").is_in(sample_ids))
+        .select("run_accession", "study", *FACET_COLUMNS.keys())
+        .to_dicts()
+    }
+    cohort_by_id = {sample: "Reference" for sample in ids1}
+    cohort_by_id.update({sample: "Comparison" for sample in ids2})
+    pca_points = [
+        {
+            "run_accession": sample,
+            "cohort": cohort_by_id[sample],
+            **{facet: str(sample_metadata[sample][facet] or "Unknown") for facet in FACET_COLUMNS},
+            "study": str(sample_metadata[sample]["study"] or "Unknown"),
+            "pc1": float(pca_coords[index, 0]),
+            "pc2": float(pca_coords[index, 1]),
+        }
+        for index, sample in enumerate(sample_ids)
+    ]
+    clean_genes = [
+        {
+            key: value if key == "gene" else float(value) if np.isfinite(value) else None
+            for key, value in row.items()
+        }
+        for row in results.to_dict(orient="records")
+    ]
+    heatmap_values = [
+        [float(value) if np.isfinite(value) else None for value in row]
+        for row in heatmap.to_numpy(dtype=float)
+    ]
+    all_heatmap_values = [
+        [float(value) if np.isfinite(value) else None for value in row]
+        for row in all_heatmap.to_numpy(dtype=float)
+    ]
+    return DifferentialExpressionResponse(
+        cohort1_n=len(ids1), cohort2_n=len(ids2), genes=clean_genes,
+        heatmap_genes=heatmap.index.astype(str).tolist(),
+        heatmap_samples=heatmap.columns.astype(str).tolist(),
+        heatmap_values=heatmap_values,
+        heatmap_groups=groups.tolist(), pca=pca_points,
+        all_heatmap_samples=all_heatmap.columns.astype(str).tolist(),
+        all_heatmap_values=all_heatmap_values,
+        all_heatmap_groups=all_groups.tolist(),
+        pca_variance=[float(value) for value in pca_ratio],
     )
 
 
