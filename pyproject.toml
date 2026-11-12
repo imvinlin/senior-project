@@ -20,6 +20,9 @@ analysis = [
 [project.scripts]
 cancerlike = "cancerlike.cli:main"
 
+[tool.vercel]
+entrypoint = "server:app"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
