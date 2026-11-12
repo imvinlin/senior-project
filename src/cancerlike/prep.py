@@ -30,8 +30,14 @@ def md5(path: Path) -> str:
 def run() -> None:
     samples = pl.read_csv(METADATA, separator="\t", infer_schema_length=0, null_values=["NA"])
     bulk = samples.filter(pl.col(FACET_COLUMNS["assay"]) == "bulk")["run_accession"].to_list()
-    expression = pl.read_csv(EXPRESSION, separator="\t", columns=["Genes", *bulk])
+    single_cell = samples.filter(pl.col(FACET_COLUMNS["assay"]) == "single-cell")[
+        "run_accession"
+    ].to_list()
+    expression = pl.read_csv(
+        EXPRESSION, separator="\t", columns=["Genes", *bulk, *single_cell]
+    )
     matrix = expression.select(bulk).to_numpy().T
+    single_cell_matrix = expression.select(single_cell).to_numpy().T
     coords, loadings, ratio = pca(matrix, COMPONENTS)
 
     DERIVED.mkdir(parents=True, exist_ok=True)
@@ -41,11 +47,16 @@ def run() -> None:
     genes = expression["Genes"].to_list()
     pl.DataFrame({"gene": genes, **weights}).write_parquet(DERIVED / "loadings.parquet")
     np.save(DERIVED / "expression.npy", matrix.T.astype(np.float32))
+    np.save(DERIVED / "single_cell_expression.npy", single_cell_matrix.T.astype(np.float32))
+    pl.DataFrame({"run_accession": single_cell}).write_parquet(
+        DERIVED / "single_cell_samples.parquet"
+    )
     manifest = {
         "source": {
             "doi": SOURCE_DOI,
             "metadata_md5": md5(METADATA),
             "expression_md5": md5(EXPRESSION),
+            "single_cell_samples": len(single_cell),
         },
         "pca": {
             "fit_on": "bulk samples only",
@@ -58,4 +69,7 @@ def run() -> None:
         "created": datetime.now(UTC).isoformat(timespec="seconds"),
     }
     (DERIVED / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n")
-    print(f"wrote {DERIVED}: pca.parquet ({len(bulk)} samples), loadings, expression, manifest")
+    print(
+        f"wrote {DERIVED}: pca.parquet ({len(bulk)} bulk samples), "
+        f"single_cell_expression.npy ({len(single_cell)} samples), loadings, manifest"
+    )

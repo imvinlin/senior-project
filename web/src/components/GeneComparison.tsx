@@ -147,6 +147,7 @@ export function GeneComparison({
   setGene2,
   scope,
   setScope,
+  assay,
   view,
   error,
   pending,
@@ -157,11 +158,13 @@ export function GeneComparison({
   setGene2: (gene: string) => void;
   scope: "global" | "cohort";
   setScope: (scope: "global" | "cohort") => void;
+  assay: "bulk" | "single-cell";
   view: GeneExpressionView | null;
   error: string | null;
   pending: boolean;
 }) {
   const [colorBy, setColorBy] = useState<Facet>("species");
+  const assayLabel = assay === "bulk" ? "bulk" : "single-cell";
   const [hover, setHover] = useState<Point | null>(null);
   const points = view?.points ?? [];
   const xAxis = axisTicks(points.map((point) => point.x));
@@ -208,7 +211,7 @@ export function GeneComparison({
 
   return (
     <section className="mt-8">
-      <h2 className="text-sm font-medium text-zinc-700">Compare expression across bulk samples</h2>
+      <h2 className="text-sm font-medium text-zinc-700">Compare expression across {assayLabel} samples</h2>
       <div className="mt-3 flex flex-wrap items-end gap-4">
         <GenePicker label="Gene 1 (X axis)" gene={gene1} setGene={setGene1} />
         <GenePicker label="Gene 2 (Y axis)" gene={gene2} setGene={setGene2} />
@@ -219,14 +222,14 @@ export function GeneComparison({
               <button key={option} type="button" aria-pressed={scope === option}
                 className={`px-3 py-1.5 ${scope === option ? "bg-zinc-100 font-medium" : "bg-white hover:bg-zinc-50"}`}
                 onClick={() => setScope(option)}>
-                {option === "global" ? "All bulk samples" : "Filtered cohort"}
+                {option === "global" ? `All ${assayLabel} samples` : "Filtered cohort"}
               </button>
             ))}
           </div>
         </div>
       </div>
       <p className="mt-2 text-xs text-zinc-500">
-        Expression values are from the prepared bulk atlas. Filtered cohort mode applies the active sidebar filters.
+        Expression values are from the prepared {assayLabel} atlas. Filtered cohort mode applies the active sidebar filters.
       </p>
       {gene1 && gene1 === gene2 && (
         <p className="mt-3 text-sm text-amber-700">Choose two different genes to compare their expression.</p>
@@ -234,7 +237,7 @@ export function GeneComparison({
       {error && <p className="mt-3 text-sm text-red-700">Could not load expression data: {error}.</p>}
       {pending && <p className="mt-3 text-sm text-zinc-500">Loading expression data...</p>}
       {!pending && view && points.length === 0 && (
-        <p className="mt-3 text-sm text-zinc-500">No bulk samples match this selection.</p>
+        <p className="mt-3 text-sm text-zinc-500">No {assayLabel} samples match this selection.</p>
       )}
       {!pending && view && points.length > 0 && (
         <>
@@ -248,7 +251,7 @@ export function GeneComparison({
               Download CSV
             </button>
             <span className="text-zinc-500">
-              {formatCount(points.length)} bulk samples plotted; {formatCount(view.excluded)} non-bulk samples excluded.
+              {formatCount(points.length)} {assayLabel} samples plotted; {formatCount(view.excluded)} other-assay samples excluded.
             </span>
           </div>
           <div className="mt-3 flex flex-wrap gap-6">
@@ -344,7 +347,7 @@ export function GeneComparison({
                 )}
               </ul>
               <p className="mt-4 text-zinc-600">
-                {formatCount(points.length)} bulk samples are plotted from {formatCount(view.total)} selected samples.
+                {formatCount(points.length)} {assayLabel} samples are plotted from {formatCount(view.total)} selected samples.
               </p>
             </div>
           </div>

@@ -3,6 +3,7 @@ import { useSearchParams } from "next/navigation";
 import { useApi } from "@/lib/useApi";
 
 type Cohort = { n: number; facets: Record<string, Record<string, number>> };
+export type AssayMode = "bulk" | "single-cell";
 
 function pushFilters(params: URLSearchParams) {
   const next = params.toString();
@@ -14,6 +15,7 @@ export type CohortState = ReturnType<typeof useCohort>;
 export function useCohort() {
   const searchParams = useSearchParams();
   const query = searchParams.toString();
+  const assay: AssayMode = searchParams.get("assay") === "single-cell" ? "single-cell" : "bulk";
   const { data: cohort, error } = useApi<Cohort>(`/api/cohort?${query}`);
 
   function setFilters(values: Record<string, string>) {
@@ -39,13 +41,23 @@ export function useCohort() {
   }
 
   function clearFilters() {
-    pushFilters(new URLSearchParams());
+    const params = new URLSearchParams();
+    params.set("assay", assay);
+    pushFilters(params);
+  }
+
+  function setAssay(value: AssayMode) {
+    const params = new URLSearchParams(query);
+    params.set("assay", value);
+    pushFilters(params);
   }
 
   return {
     cohort,
     error,
     filters: searchParams,
+    assay,
+    setAssay,
     setFilters,
     toggleFilter,
     removeFilter,

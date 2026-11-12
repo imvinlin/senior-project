@@ -8,7 +8,8 @@ import { FilterFacetGroup } from "@/components/FilterSidebar";
 import { useApi } from "@/lib/useApi";
 import { useCohort } from "@/lib/useCohort";
 
-const FACETS = ["species", "system", "cancer", "subtype", "tissue", "sex", "assay", "clade"] as const;
+const FACETS = ["species", "system", "cancer", "subtype", "tissue", "sex", "clade"] as const;
+const PCA_FIELDS = [...FACETS, "assay", "study"] as const;
 type Facet = (typeof FACETS)[number];
 type Filters = Record<Facet, string[]>;
 type CohortCounts = { cohort1_n: number; cohort2_n: number; identical: boolean; overlap: number };
@@ -29,7 +30,7 @@ type Result = {
 const CONTROL = "rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent";
 
 function emptyFilters(): Filters {
-  return { species: [], system: [], cancer: [], subtype: [], tissue: [], sex: [], assay: [], clade: [] };
+  return { species: [], system: [], cancer: [], subtype: [], tissue: [], sex: [], clade: [] };
 }
 
 function signature(filters: Filters) {
@@ -257,7 +258,7 @@ function ResultPca({ result, colorBy, setColorBy }: { result: Result; colorBy: s
       <div className="flex flex-wrap items-center gap-3 text-xs text-zinc-700">
         <span>Colour by</span>
         <select className={`${CONTROL} capitalize`} value={colorBy} onChange={(event) => setColorBy(event.target.value)}>
-          {["cohort", ...FACETS, "study"].map((field) => <option key={field} value={field}>{field === "cohort" ? "Group (Reference / Comparison)" : field.replaceAll("_", " ")}</option>)}
+          {["cohort", ...PCA_FIELDS].map((field) => <option key={field} value={field}>{field === "cohort" ? "Group (Reference / Comparison)" : field.replaceAll("_", " ")}</option>)}
         </select>
         <span className="text-zinc-500">Fitted on {points.length.toLocaleString()} selected samples</span>
       </div>
@@ -353,7 +354,17 @@ function GeneResults({ genes }: { genes: Result["genes"] }) {
       </div>
       <div className="mt-2 max-h-[32rem] overflow-auto rounded border border-zinc-200">
         <table className="w-full border-collapse text-left text-xs"><thead className="sticky top-0 bg-zinc-50"><tr>{columns.map((column) => <th key={column} className="whitespace-nowrap px-3 py-2 font-medium text-zinc-600">{column.replaceAll("_", " ")}</th>)}</tr></thead>
-          <tbody>{visible.map((row) => <tr key={row.gene} className="border-t border-zinc-100">{columns.map((column) => <td key={column} className="whitespace-nowrap px-3 py-1.5 font-mono">{typeof row[column] === "number" ? row[column]!.toExponential(3) : row[column] ?? "—"}</td>)}</tr>)}</tbody>
+          <tbody>{visible.map((row) => <tr key={row.gene} className="border-t border-zinc-100">{columns.map((column) => <td key={column} className="whitespace-nowrap px-3 py-1.5 font-mono">{column === "gene" ? (
+            <a
+              href={`https://www.ncbi.nlm.nih.gov/datasets/gene/taxon/1/?search=${encodeURIComponent(row.gene)}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              title={`Search NCBI Gene for ${row.gene}`}
+              className="text-accent underline-offset-2 hover:underline focus:outline-none focus:ring-2 focus:ring-accent"
+            >
+              {row.gene}
+            </a>
+          ) : typeof row[column] === "number" ? row[column]!.toExponential(3) : row[column] ?? "—"}</td>)}</tr>)}</tbody>
         </table>
       </div>
     </>
@@ -374,9 +385,9 @@ function DifferentialExpression() {
   const [comparisonExpanded, setComparisonExpanded] = useState(true);
   const [pcaColorBy, setPcaColorBy] = useState("cohort");
   const resultsRef = useRef<HTMLDivElement>(null);
-  const options = useApi<Record<string, Record<string, number>>>("/api/differential-expression/options");
+  const options = useApi<Record<string, Record<string, number>>>(`/api/differential-expression/options?assay=${state.assay}`);
   const sameFilters = signature(cohort1) === signature(cohort2);
-  const requestBody = useMemo(() => JSON.stringify({ cohort1, cohort2 }), [cohort1, cohort2]);
+  const requestBody = useMemo(() => JSON.stringify({ assay: state.assay, cohort1, cohort2 }), [state.assay, cohort1, cohort2]);
   const activeCounts = countsKey === requestBody ? counts : null;
   const activeResult = resultKey === requestBody ? result : null;
 
@@ -436,7 +447,7 @@ function DifferentialExpression() {
 
   function downloadResults() {
     if (!activeResult) return;
-    const pcaColumns = ["run_accession", "cohort", ...FACETS, "study", "pc1", "pc2"];
+    const pcaColumns = ["run_accession", "cohort", ...PCA_FIELDS, "pc1", "pc2"];
     const pcaCsv = csv([
       pcaColumns,
       ...activeResult.pca.map((point) => pcaColumns.map((column) => point[column] ?? "")),
@@ -480,7 +491,7 @@ function DifferentialExpression() {
     <CohortShell state={state}>
       <section className="mt-5">
         <h2 className="text-lg font-medium text-zinc-800">Differential Expression Analysis</h2>
-        <p className="mt-1 text-sm text-zinc-600">Compare bulk expression between two cohorts. Both panels start with no filters applied.</p>
+        <p className="mt-1 text-sm text-zinc-600">Compare {state.assay === "bulk" ? "bulk" : "single-cell pseudo-bulk"} expression between Reference and Comparison. Both panels start with no filters applied; comparisons stay within the selected assay.</p>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <CohortFilters label="Reference" value={cohort1} options={options.data ?? {}} onChange={setCohort1} collapsed={!referenceExpanded} onToggleCollapsed={() => setReferenceExpanded(!referenceExpanded)} />
         <CohortFilters label="Comparison" value={cohort2} options={options.data ?? {}} onChange={setCohort2} collapsed={!comparisonExpanded} onToggleCollapsed={() => setComparisonExpanded(!comparisonExpanded)} />
