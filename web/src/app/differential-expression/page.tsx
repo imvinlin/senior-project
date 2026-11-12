@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 
 import { CohortBar } from "@/components/CohortBar";
 import { CohortShell, loading } from "@/components/CohortShell";
@@ -30,10 +30,6 @@ const CONTROL = "rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-
 
 function emptyFilters(): Filters {
   return { species: [], system: [], cancer: [], subtype: [], tissue: [], sex: [], assay: [], clade: [] };
-}
-
-function fromParams(params: URLSearchParams): Filters {
-  return Object.fromEntries(FACETS.map((facet) => [facet, params.getAll(facet)])) as Filters;
 }
 
 function signature(filters: Filters) {
@@ -366,9 +362,8 @@ function GeneResults({ genes }: { genes: Result["genes"] }) {
 
 function DifferentialExpression() {
   const state = useCohort();
-  const queryFilters = fromParams(state.filters);
-  const [cohort1, setCohort1] = useState<Filters>(queryFilters);
-  const [cohort2, setCohort2] = useState<Filters>(queryFilters);
+  const [cohort1, setCohort1] = useState<Filters>(emptyFilters());
+  const [cohort2, setCohort2] = useState<Filters>(emptyFilters());
   const [counts, setCounts] = useState<CohortCounts | null>(null);
   const [countsKey, setCountsKey] = useState("");
   const [result, setResult] = useState<Result | null>(null);
@@ -378,11 +373,18 @@ function DifferentialExpression() {
   const [referenceExpanded, setReferenceExpanded] = useState(true);
   const [comparisonExpanded, setComparisonExpanded] = useState(true);
   const [pcaColorBy, setPcaColorBy] = useState("cohort");
+  const resultsRef = useRef<HTMLDivElement>(null);
   const options = useApi<Record<string, Record<string, number>>>("/api/differential-expression/options");
   const sameFilters = signature(cohort1) === signature(cohort2);
   const requestBody = useMemo(() => JSON.stringify({ cohort1, cohort2 }), [cohort1, cohort2]);
   const activeCounts = countsKey === requestBody ? counts : null;
   const activeResult = resultKey === requestBody ? result : null;
+
+  useEffect(() => {
+    if (activeResult) {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [activeResult]);
 
   useEffect(() => {
     let stale = false;
@@ -478,7 +480,7 @@ function DifferentialExpression() {
     <CohortShell state={state}>
       <section className="mt-5">
         <h2 className="text-lg font-medium text-zinc-800">Differential Expression Analysis</h2>
-        <p className="mt-1 text-sm text-zinc-600">Compare bulk expression between two cohorts. Both panels start with the filters from the current cohort page.</p>
+        <p className="mt-1 text-sm text-zinc-600">Compare bulk expression between two cohorts. Both panels start with no filters applied.</p>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <CohortFilters label="Reference" value={cohort1} options={options.data ?? {}} onChange={setCohort1} collapsed={!referenceExpanded} onToggleCollapsed={() => setReferenceExpanded(!referenceExpanded)} />
         <CohortFilters label="Comparison" value={cohort2} options={options.data ?? {}} onChange={setCohort2} collapsed={!comparisonExpanded} onToggleCollapsed={() => setComparisonExpanded(!comparisonExpanded)} />
@@ -493,7 +495,7 @@ function DifferentialExpression() {
         {error && <p role="alert" className="mt-3 text-sm text-red-700">{error}</p>}
         <button type="button" disabled={pending || !activeCounts || sameFilters || activeCounts.identical || activeCounts.overlap > 0 || activeCounts.cohort1_n < 2 || activeCounts.cohort2_n < 2} onClick={analyze} className="mt-4 rounded bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50">{pending ? "Analyzing…" : "Analyze"}</button>
       </section>
-      {activeResult && <div className="mt-8 space-y-8">
+      {activeResult && <div ref={resultsRef} className="mt-8 scroll-mt-4 space-y-8">
         <button type="button" onClick={downloadResults} className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-accent">Download analysis results (.zip)</button>
         <section><h3 className="font-medium text-zinc-800">PCA of selected samples</h3><ResultPca result={activeResult} colorBy={pcaColorBy} setColorBy={setPcaColorBy} /></section>
         <section><h3 className="font-medium text-zinc-800">Significant-gene heatmap</h3><p className="mt-1 text-xs text-zinc-500">Top significant genes, row z-scores for display, and up to 25 samples per cohort. Blue indicates lower and red higher relative expression within each gene.</p><Heatmap result={activeResult} /></section>

@@ -163,29 +163,6 @@ def _row_mean(values: np.ndarray) -> np.ndarray:
     )
 
 
-# PCA of samples, using variable genes and row-wise gene standardization
-def generate_pca_df(
-    expression: pd.DataFrame, metadata: pd.DataFrame, group_field: str
-) -> pd.DataFrame:
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
-
-    values = expression.to_numpy(dtype=float)
-    variances = np.nanvar(values, axis=1)
-    n_genes = min(2000, int(np.isfinite(variances).sum()))
-    keep = np.argsort(np.nan_to_num(variances, nan=-np.inf))[-n_genes:]
-    matrix = values[keep].T
-    matrix = np.where(np.isfinite(matrix), matrix,
-                      np.nanmedian(matrix, axis=0))
-    matrix = StandardScaler().fit_transform(matrix)
-    coords = PCA(n_components=2).fit_transform(matrix)
-    frame = pd.DataFrame(
-        coords, columns=["PC1", "PC2"], index=expression.columns)
-    frame[group_field] = metadata.loc[frame.index,
-                                      group_field].fillna("Unknown").to_numpy()
-    return frame
-
-
 def generate_heatmap_df(
     expression: pd.DataFrame,
     metadata: pd.DataFrame,
