@@ -16,6 +16,7 @@ function GeneExplorer() {
   params.set("gene1", gene1);
   params.set("gene2", gene2);
   params.set("scope", scope);
+  params.set("assay", state.assay);
   const ready = Boolean(gene1 && gene2 && gene1 !== gene2);
   const { data, error, pending } = useApi<GeneExpressionView>(
     `/api/genes/expression?${params.toString()}`,
@@ -31,6 +32,7 @@ function GeneExplorer() {
         setGene2={setGene2}
         scope={scope}
         setScope={setScope}
+        assay={state.assay}
         view={data}
         error={error}
         pending={pending}

@@ -36,7 +36,7 @@ function PcaExplorer() {
       </div>
       {error && <p className="mt-2 text-sm text-red-700">Could not load PCA: {error}.</p>}
       {data && state.cohort && (
-        <PcaPlot view={data} n={state.cohort.n} loadings={data.loadings ?? loadings.data} />
+        <PcaPlot view={data} n={state.cohort.n} loadings={data.loadings ?? loadings.data} assay={state.assay} />
       )}
     </CohortShell>
   );

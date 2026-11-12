@@ -5,8 +5,6 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from scipy import stats
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 
 EXPRESSION_PATH = Path("data/raw/Paipu_deduplicated_expression.tsv")
 METADATA_PATH = Path("data/raw/Paipu_deduplicated_metadata.tsv")
@@ -71,6 +69,21 @@ def load_samples(
     expression = expression.apply(pd.to_numeric, errors="coerce")
     metadata = metadata.loc[samples]
     return expression, metadata
+
+
+def load_expression_samples(
+    sample_ids: Sequence[str],
+    expression_path: Path = EXPRESSION_PATH,
+) -> pd.DataFrame:
+    """Load only the requested run columns from the expression matrix."""
+    header = pd.read_csv(expression_path, sep="\t", nrows=0).columns.tolist()
+    selected = [sample for sample in header[1:] if sample in set(sample_ids)]
+    if not selected:
+        raise ValueError("No selected samples have expression columns")
+    expression = pd.read_csv(
+        expression_path, sep="\t", usecols=["Genes", *selected], index_col="Genes"
+    )
+    return expression.apply(pd.to_numeric, errors="coerce")
 
 
 # compare groups with Welch's t-test and adjust p-values across genes
@@ -148,24 +161,6 @@ def _row_mean(values: np.ndarray) -> np.ndarray:
         out=np.full(values.shape[0], np.nan),
         where=counts > 0
     )
-
-
-# PCA of samples, using variable genes and row-wise gene standardization
-def generate_pca_df(expression: pd.DataFrame, metadata: pd.DataFrame, group_field: str) -> pd.DataFrame:
-    values = expression.to_numpy(dtype=float)
-    variances = np.nanvar(values, axis=1)
-    n_genes = min(2000, int(np.isfinite(variances).sum()))
-    keep = np.argsort(np.nan_to_num(variances, nan=-np.inf))[-n_genes:]
-    matrix = values[keep].T
-    matrix = np.where(np.isfinite(matrix), matrix,
-                      np.nanmedian(matrix, axis=0))
-    matrix = StandardScaler().fit_transform(matrix)
-    coords = PCA(n_components=2).fit_transform(matrix)
-    frame = pd.DataFrame(
-        coords, columns=["PC1", "PC2"], index=expression.columns)
-    frame[group_field] = metadata.loc[frame.index,
-                                      group_field].fillna("Unknown").to_numpy()
-    return frame
 
 
 def generate_heatmap_df(

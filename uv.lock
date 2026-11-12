@@ -115,15 +115,15 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "numpy" },
+    { name = "pandas" },
     { name = "polars" },
+    { name = "scipy" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
 [package.optional-dependencies]
 analysis = [
-    { name = "pandas" },
     { name = "scikit-learn" },
-    { name = "scipy" },
 ]
 
 [package.dev-dependencies]
@@ -137,10 +137,10 @@ dev = [
 requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "numpy", specifier = ">=2" },
-    { name = "pandas", marker = "extra == 'analysis'", specifier = ">=2.2" },
+    { name = "pandas", specifier = ">=2.2" },
     { name = "polars", specifier = ">=1.0" },
     { name = "scikit-learn", marker = "extra == 'analysis'", specifier = ">=1.5" },
-    { name = "scipy", marker = "extra == 'analysis'", specifier = ">=1.14" },
+    { name = "scipy", specifier = ">=1.14" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 provides-extras = ["analysis"]

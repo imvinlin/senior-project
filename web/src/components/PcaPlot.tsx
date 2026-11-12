@@ -86,10 +86,12 @@ export function PcaPlot({
   view,
   n,
   loadings,
+  assay,
 }: {
   view: PcaView;
   n: number;
   loadings: Loadings | null;
+  assay: "bulk" | "single-cell";
 }) {
   const [hover, setHover] = useState<Point | null>(null);
   const [xAxis, setXAxis] = useState<Axis>("pc1");
@@ -97,11 +99,12 @@ export function PcaPlot({
   const [zoomed, setZoomed] = useState(false);
   const [colorBy, setColorBy] = useState<Facet>("species");
   const { points, variance, extent, top, excluded, fit } = view;
+  const assayLabel = assay === "bulk" ? "bulk" : "single-cell";
   if (points.length === 0) {
     return (
       <p className="mt-2 text-sm text-zinc-500">
-        No bulk samples in this cohort, so there is nothing to plot. {formatCount(excluded)}{" "}
-        single-cell samples have no coordinates.
+        No {assayLabel} samples in this cohort have PCA coordinates, so there is nothing to plot.
+        {excluded > 0 && <> {formatCount(excluded)} selected samples have no coordinates.</>}
       </p>
     );
   }
@@ -268,17 +271,17 @@ export function PcaPlot({
             )}
           </ul>
           <p className="mt-4 text-zinc-600">
-            {formatCount(points.length)} of {formatCount(n)} cohort samples are plotted. The other{" "}
-            {formatCount(excluded)} are single-cell and have no coordinates.
+            {formatCount(points.length)} of {formatCount(n)} {assayLabel} samples are plotted. The other{" "}
+            {formatCount(excluded)} selected samples have no coordinates.
           </p>
           {fit === "global" ? (
             <p className="mt-2 text-zinc-600">
-              The embedding was fit once on all 3,089 bulk samples, so PC1 means the same thing for
+              The embedding was fit once on all {assayLabel} samples, so PC1 means the same thing for
               every cohort. The frame is the whole atlas unless you zoom.
             </p>
           ) : (
             <p className="mt-2 text-zinc-600">
-              Fit on the {formatCount(points.length)} bulk samples in this cohort only. The axes and the
+              Fit on the {formatCount(points.length)} {assayLabel} samples in this cohort only. The axes and the
               variance belong to this cohort and cannot be compared with another one.
             </p>
           )}
