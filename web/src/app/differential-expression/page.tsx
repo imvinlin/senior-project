@@ -26,6 +26,7 @@ type Result = {
   all_heatmap_groups: string[];
   pca: ({ run_accession: string; cohort: string; pc1: number; pc2: number } & Record<string, string | number>)[];
   pca_variance: number[];
+  go_queries: Record<string, string[]>;
 };
 const CONTROL = "rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent";
 
@@ -371,6 +372,40 @@ function GeneResults({ genes }: { genes: Result["genes"] }) {
   );
 }
 
+function GoEnrichment({ queries }: { queries: Result["go_queries"] }) {
+  const [copiedDirection, setCopiedDirection] = useState<string | null>(null);
+
+  async function copyGenes(direction: string, genes: string[]) {
+    try {
+      await navigator.clipboard.writeText(genes.join("\n"));
+      setCopiedDirection(direction);
+    } catch {
+      setCopiedDirection(null);
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="font-medium text-zinc-800">Pathway enrichment with g:Profiler</h3>
+      <p className="mt-1 text-xs text-zinc-500">Open each significant-gene list in g:Profiler, which defaults to Homo sapiens. Gene symbols from other species may not map correctly under that setting.</p>
+      <p className="mt-2 text-sm"><a href="https://biit.cs.ut.ee/gprofiler/gost" target="_blank" rel="noopener noreferrer" className="text-accent underline-offset-2 hover:underline">Open g:Profiler</a></p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {Object.entries(queries).map(([direction, genes]) => <div key={direction} className="min-w-0 rounded border border-zinc-200 p-3">
+          <h4 className="text-sm font-medium text-zinc-800">{direction}</h4>
+          <p className="mt-1 text-xs text-zinc-500">{genes.length.toLocaleString()} significant genes (adjusted p-value ≤ 0.05)</p>
+          {genes.length > 0 ? <>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm">
+              <button type="button" onClick={() => void copyGenes(direction, genes)} className="text-accent underline-offset-2 hover:underline">{copiedDirection === direction ? "Copied" : "Copy gene list"}</button>
+            </div>
+            <textarea readOnly rows={5} value={genes.join("\n")} className="mt-2 max-h-40 w-full rounded border border-zinc-200 p-2 font-mono text-xs text-zinc-600" aria-label={`${direction} genes`} />
+          </> : <p className="mt-2 text-xs text-zinc-500">No significant genes in this direction.</p>}
+        </div>)}
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">Paste a copied list into the g:Profiler query box. Explore the enriched terms and pathways on the g:Profiler site. You can download the list of enriched terms as a CSV from the "Detailed Results" tab.</p>
+    </section>
+  );
+}
+
 function DifferentialExpression() {
   const state = useCohort();
   const [cohort1, setCohort1] = useState<Filters>(emptyFilters());
@@ -385,6 +420,7 @@ function DifferentialExpression() {
   const [comparisonExpanded, setComparisonExpanded] = useState(true);
   const [pcaColorBy, setPcaColorBy] = useState("cohort");
   const resultsRef = useRef<HTMLDivElement>(null);
+  const scrolledResultRef = useRef("");
   const options = useApi<Record<string, Record<string, number>>>(`/api/differential-expression/options?assay=${state.assay}`);
   const sameFilters = signature(cohort1) === signature(cohort2);
   const requestBody = useMemo(() => JSON.stringify({ assay: state.assay, cohort1, cohort2 }), [state.assay, cohort1, cohort2]);
@@ -392,10 +428,11 @@ function DifferentialExpression() {
   const activeResult = resultKey === requestBody ? result : null;
 
   useEffect(() => {
-    if (activeResult) {
+    if (activeResult && resultKey && scrolledResultRef.current !== resultKey) {
       resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrolledResultRef.current = resultKey;
     }
-  }, [activeResult]);
+  }, [activeResult, resultKey]);
 
   useEffect(() => {
     let stale = false;
@@ -511,6 +548,7 @@ function DifferentialExpression() {
         <section><h3 className="font-medium text-zinc-800">PCA of selected samples</h3><ResultPca result={activeResult} colorBy={pcaColorBy} setColorBy={setPcaColorBy} /></section>
         <section><h3 className="font-medium text-zinc-800">Significant-gene heatmap</h3><p className="mt-1 text-xs text-zinc-500">Top significant genes, row z-scores for display, and up to 25 samples per cohort. Blue indicates lower and red higher relative expression within each gene.</p><Heatmap result={activeResult} /></section>
         <section><h3 className="font-medium text-zinc-800">Significant differentially expressed genes</h3><p className="mt-1 text-xs text-zinc-500">Welch’s t-test with Benjamini–Hochberg adjustment. Only genes with adjusted p-value ≤ 0.05 are included. Mean difference is Comparison minus Reference on the input expression scale.</p><GeneResults genes={activeResult.genes} /></section>
+        <GoEnrichment queries={activeResult.go_queries} />
       </div>}
     </CohortShell>
   );
