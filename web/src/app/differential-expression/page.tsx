@@ -8,7 +8,7 @@ import { FilterFacetGroup } from "@/components/FilterSidebar";
 import { useApi } from "@/lib/useApi";
 import { useCohort } from "@/lib/useCohort";
 
-const FACETS = ["species", "system", "cancer", "subtype", "tissue", "sex", "clade"] as const;
+const FACETS = ["species", "clade", "system", "cancer", "subtype", "tissue", "sex"] as const;
 const PCA_FIELDS = [...FACETS, "assay", "study"] as const;
 type Facet = (typeof FACETS)[number];
 type Filters = Record<Facet, string[]>;
@@ -18,19 +18,22 @@ type Result = {
   cohort2_n: number;
   genes: { gene: string; mean_reference: number | null; mean_comparison: number | null; mean_difference: number | null; statistic: number | null; pval: number | null; padj: number | null }[];
   heatmap_genes: string[];
-  heatmap_samples: string[];
-  heatmap_values: (number | null)[][];
-  heatmap_groups: string[];
   all_heatmap_samples: string[];
   all_heatmap_values: (number | null)[][];
   all_heatmap_groups: string[];
   pca: ({ run_accession: string; cohort: string; pc1: number; pc2: number } & Record<string, string | number>)[];
   pca_variance: number[];
+  go_queries: Record<string, string[]>;
 };
 const CONTROL = "rounded border border-zinc-300 bg-white px-2 py-1 text-xs text-zinc-900 focus:outline-none focus:ring-2 focus:ring-accent";
 
 function emptyFilters(): Filters {
-  return { species: [], system: [], cancer: [], subtype: [], tissue: [], sex: [], clade: [] };
+  return { species: [], clade: [], system: [], cancer: [], subtype: [], tissue: [], sex: [] };
+}
+
+function filtersFromQuery(query: string): Filters {
+  const params = new URLSearchParams(query);
+  return Object.fromEntries(FACETS.map((facet) => [facet, params.getAll(facet)])) as Filters;
 }
 
 function signature(filters: Filters) {
@@ -148,30 +151,49 @@ function pcaSvg(result: Result, colorBy: string) {
   return lines.join("");
 }
 
-function heatmapSvg(result: Result) {
+type HeatmapData = { samples: string[]; groups: string[]; values: (number | null)[][] };
+
+function heatmapView(result: Result, maxPerGroup: number | "all"): HeatmapData {
+  const counts = new Map<string, number>();
+  const indexes: number[] = [];
+  result.all_heatmap_groups.forEach((group, index) => {
+    const count = counts.get(group) ?? 0;
+    if (maxPerGroup === "all" || count < maxPerGroup) {
+      indexes.push(index);
+      counts.set(group, count + 1);
+    }
+  });
+  return {
+    samples: indexes.map((index) => result.all_heatmap_samples[index] ?? ""),
+    groups: indexes.map((index) => result.all_heatmap_groups[index] ?? ""),
+    values: result.all_heatmap_values.map((row) => indexes.map((index) => row[index] ?? null)),
+  };
+}
+
+function heatmapSvg(result: Result, data: HeatmapData) {
   const cellWidth = 16; const cellHeight = 18; const labelWidth = 170; const headerHeight = 170;
-  const width = labelWidth + result.heatmap_samples.length * cellWidth + 20;
+  const width = labelWidth + data.samples.length * cellWidth + 20;
   const height = headerHeight + result.heatmap_genes.length * cellHeight + 20;
   const lines = [
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">`,
     `<rect width="100%" height="100%" fill="white"/>`,
-    `<text x="12" y="24" font-family="sans-serif" font-size="12" fill="#3f3f46">Gene</text>`,
+    `<text x="12" y="${height - 4}" font-family="sans-serif" font-size="12" fill="#3f3f46">Gene</text>`,
   ];
-  result.heatmap_samples.forEach((sample, column) => {
+  data.samples.forEach((_, column) => {
     const x = labelWidth + column * cellWidth + cellWidth / 2;
     const y = headerHeight - 8;
-    const label = `${sample} · ${result.heatmap_groups[column]}`;
+    const label = data.groups[column] ?? "";
     lines.push(`<text x="${x}" y="${y}" transform="rotate(-90 ${x} ${y})" text-anchor="start" font-family="monospace" font-size="9" fill="#52525b">${escapeXml(label)}</text>`);
   });
   result.heatmap_genes.forEach((gene, row) => {
     const y = headerHeight + row * cellHeight;
     lines.push(`<text x="12" y="${y + 12}" font-family="monospace" font-size="10" fill="#3f3f46">${escapeXml(gene)}</text>`);
-    (result.heatmap_values[row] ?? []).forEach((value, column) => {
+    (data.values[row] ?? []).forEach((value, column) => {
       const x = labelWidth + column * cellWidth;
       const color = value == null
         ? "#f4f4f5"
         : `hsl(${value < 0 ? 217 : 0} 78% ${96 - Math.min(1, Math.abs(value) / 2.5) * 50}%)`;
-      lines.push(`<rect x="${x}" y="${y}" width="${cellWidth}" height="${cellHeight}" fill="${color}"><title>${escapeXml(`${gene} · ${result.heatmap_samples[column]} · ${result.heatmap_groups[column]} · ${value ?? "missing"}`)}</title></rect>`);
+      lines.push(`<rect x="${x}" y="${y}" width="${cellWidth}" height="${cellHeight}" fill="${color}"><title>${escapeXml(`${gene} · ${data.groups[column]} · ${value ?? "missing"}`)}</title></rect>`);
     });
   });
   lines.push("</svg>");
@@ -285,24 +307,25 @@ function ResultPca({ result, colorBy, setColorBy }: { result: Result; colorBy: s
   );
 }
 
-function Heatmap({ result }: { result: Result }) {
+function Heatmap({ result, maxPerGroup }: { result: Result; maxPerGroup: number | "all" }) {
   if (!result.heatmap_genes.length) {
     return <p className="mt-2 text-sm text-zinc-500">No genes meet the adjusted p-value cutoff of 0.05.</p>;
   }
+  const data = heatmapView(result, maxPerGroup);
   return (
     <div className="mt-3 max-w-full overflow-auto rounded border border-zinc-200">
       <table className="border-collapse text-[10px]">
         <thead className="sticky top-0 bg-white">
           <tr>
-            <th className="sticky left-0 z-10 bg-white px-2 py-1 text-left">Gene</th>
-            {result.heatmap_samples.map((sample, i) => (
+            <th className="sticky left-0 z-10 bg-white px-2 py-1 text-left" />
+            {data.samples.map((sample, i) => (
               <th
-                key={sample}
+                key={`${sample}-${i}`}
                 className="h-36 min-w-6 px-1 py-2 text-left align-bottom font-normal text-zinc-600"
-                title={`${sample} · ${result.heatmap_groups[i]}`}
+                title={data.groups[i]}
               >
                 <span className="inline-block whitespace-nowrap text-[10px]" style={{ writingMode: "vertical-rl", transform: "rotate(180deg)" }}>
-                  {sample} · {result.heatmap_groups[i]}
+                  {data.groups[i]}
                 </span>
               </th>
             ))}
@@ -322,11 +345,11 @@ function Heatmap({ result }: { result: Result }) {
                   {gene}
                 </a>
               </th>
-              {(result.heatmap_values[row] ?? []).map((value, col) => (
+              {(data.values[row] ?? []).map((value, col) => (
                 <td
-                  key={result.heatmap_samples[col]}
+                  key={`${data.samples[col]}-${col}`}
                   className="h-3 min-w-5 p-0"
-                  title={`${gene} · ${result.heatmap_samples[col]} · ${value?.toFixed(2) ?? "missing"}`}
+                  title={`${gene} · ${data.groups[col]} · ${value?.toFixed(2) ?? "missing"}`}
                   style={{
                     backgroundColor: value == null
                       ? "#f4f4f5"
@@ -338,6 +361,7 @@ function Heatmap({ result }: { result: Result }) {
           ))}
         </tbody>
       </table>
+      <div className="sticky left-0 w-fit bg-white px-2 py-1 text-xs text-zinc-600">Gene</div>
     </div>
   );
 }
@@ -371,10 +395,46 @@ function GeneResults({ genes }: { genes: Result["genes"] }) {
   );
 }
 
+function GoEnrichment({ queries }: { queries: Result["go_queries"] }) {
+  const [copiedDirection, setCopiedDirection] = useState<string | null>(null);
+
+  async function copyGenes(direction: string, genes: string[]) {
+    try {
+      await navigator.clipboard.writeText(genes.join("\n"));
+      setCopiedDirection(direction);
+    } catch {
+      setCopiedDirection(null);
+    }
+  }
+
+  return (
+    <section>
+      <h3 className="font-medium text-zinc-800">Pathway enrichment with g:Profiler</h3>
+      <p className="mt-1 text-xs text-zinc-500">Open each significant-gene list in g:Profiler, which defaults to Homo sapiens. Gene symbols from other species may not map correctly under that setting.</p>
+      <p className="mt-2 text-sm"><a href="https://biit.cs.ut.ee/gprofiler/gost" target="_blank" rel="noopener noreferrer" className="text-accent underline-offset-2 hover:underline">Open g:Profiler</a></p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2">
+        {Object.entries(queries).map(([direction, genes]) => <div key={direction} className="min-w-0 rounded border border-zinc-200 p-3">
+          <h4 className="text-sm font-medium text-zinc-800">{direction}</h4>
+          <p className="mt-1 text-xs text-zinc-500">{genes.length.toLocaleString()} significant genes (adjusted p-value ≤ 0.05)</p>
+          {genes.length > 0 ? <>
+            <div className="mt-2 flex flex-wrap gap-3 text-sm">
+              <button type="button" onClick={() => void copyGenes(direction, genes)} className="text-accent underline-offset-2 hover:underline">{copiedDirection === direction ? "Copied" : "Copy gene list"}</button>
+            </div>
+            <textarea readOnly rows={5} value={genes.join("\n")} className="mt-2 max-h-40 w-full rounded border border-zinc-200 p-2 font-mono text-xs text-zinc-600" aria-label={`${direction} genes`} />
+          </> : <p className="mt-2 text-xs text-zinc-500">No significant genes in this direction.</p>}
+        </div>)}
+      </div>
+      <p className="mt-2 text-xs text-zinc-500">Paste a copied list into the g:Profiler query box. Explore the enriched terms and pathways on the g:Profiler site. You can download the list of enriched terms as a CSV from the "Detailed Results" tab.</p>
+    </section>
+  );
+}
+
 function DifferentialExpression() {
   const state = useCohort();
-  const [cohort1, setCohort1] = useState<Filters>(emptyFilters());
-  const [cohort2, setCohort2] = useState<Filters>(emptyFilters());
+  const activeQuery = state.filters.toString();
+  const activeFilters = useMemo(() => filtersFromQuery(activeQuery), [activeQuery]);
+  const [cohort1, setCohort1] = useState<Filters>(() => activeFilters);
+  const [cohort2, setCohort2] = useState<Filters>(() => activeFilters);
   const [counts, setCounts] = useState<CohortCounts | null>(null);
   const [countsKey, setCountsKey] = useState("");
   const [result, setResult] = useState<Result | null>(null);
@@ -384,7 +444,9 @@ function DifferentialExpression() {
   const [referenceExpanded, setReferenceExpanded] = useState(true);
   const [comparisonExpanded, setComparisonExpanded] = useState(true);
   const [pcaColorBy, setPcaColorBy] = useState("cohort");
+  const [heatmapSampleLimit, setHeatmapSampleLimit] = useState<number | "all">("all");
   const resultsRef = useRef<HTMLDivElement>(null);
+  const scrolledResultRef = useRef("");
   const options = useApi<Record<string, Record<string, number>>>(`/api/differential-expression/options?assay=${state.assay}`);
   const sameFilters = signature(cohort1) === signature(cohort2);
   const requestBody = useMemo(() => JSON.stringify({ assay: state.assay, cohort1, cohort2 }), [state.assay, cohort1, cohort2]);
@@ -392,10 +454,16 @@ function DifferentialExpression() {
   const activeResult = resultKey === requestBody ? result : null;
 
   useEffect(() => {
-    if (activeResult) {
+    setCohort1(activeFilters);
+    setCohort2(activeFilters);
+  }, [activeQuery]);
+
+  useEffect(() => {
+    if (activeResult && resultKey && scrolledResultRef.current !== resultKey) {
       resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      scrolledResultRef.current = resultKey;
     }
-  }, [activeResult]);
+  }, [activeResult, resultKey]);
 
   useEffect(() => {
     let stale = false;
@@ -476,7 +544,7 @@ function DifferentialExpression() {
       { name: "heatmap_sample_groups.csv", content: groupCsv },
       { name: "differential_expression.csv", content: degCsv },
       { name: "pca_plot.svg", content: pcaSvg(activeResult, pcaColorBy) },
-      { name: "heatmap.svg", content: heatmapSvg(activeResult) },
+      { name: "heatmap.svg", content: heatmapSvg(activeResult, heatmapView(activeResult, heatmapSampleLimit)) },
     ]);
     const url = URL.createObjectURL(archive);
     const link = document.createElement("a");
@@ -491,7 +559,7 @@ function DifferentialExpression() {
     <CohortShell state={state}>
       <section className="mt-5">
         <h2 className="text-lg font-medium text-zinc-800">Differential Expression Analysis</h2>
-        <p className="mt-1 text-sm text-zinc-600">Compare {state.assay === "bulk" ? "bulk" : "single-cell pseudo-bulk"} expression between Reference and Comparison. Both panels start with no filters applied; comparisons stay within the selected assay.</p>
+        <p className="mt-1 text-sm text-zinc-600">Compare {state.assay === "bulk" ? "bulk" : "single-cell pseudo-bulk"} expression between Reference and Comparison. The panels start with the active cohort filters; comparisons stay within the selected assay.</p>
         <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <CohortFilters label="Reference" value={cohort1} options={options.data ?? {}} onChange={setCohort1} collapsed={!referenceExpanded} onToggleCollapsed={() => setReferenceExpanded(!referenceExpanded)} />
         <CohortFilters label="Comparison" value={cohort2} options={options.data ?? {}} onChange={setCohort2} collapsed={!comparisonExpanded} onToggleCollapsed={() => setComparisonExpanded(!comparisonExpanded)} />
@@ -509,8 +577,9 @@ function DifferentialExpression() {
       {activeResult && <div ref={resultsRef} className="mt-8 scroll-mt-4 space-y-8">
         <button type="button" onClick={downloadResults} className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-700 hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-accent">Download analysis results (.zip)</button>
         <section><h3 className="font-medium text-zinc-800">PCA of selected samples</h3><ResultPca result={activeResult} colorBy={pcaColorBy} setColorBy={setPcaColorBy} /></section>
-        <section><h3 className="font-medium text-zinc-800">Significant-gene heatmap</h3><p className="mt-1 text-xs text-zinc-500">Top significant genes, row z-scores for display, and up to 25 samples per cohort. Blue indicates lower and red higher relative expression within each gene.</p><Heatmap result={activeResult} /></section>
+        <section><div className="flex flex-wrap items-center justify-between gap-2"><h3 className="font-medium text-zinc-800">Significant-gene heatmap</h3><label className="flex items-center gap-2 text-xs text-zinc-600">Samples per group<select value={heatmapSampleLimit} onChange={(event) => setHeatmapSampleLimit(event.target.value === "all" ? "all" : Number(event.target.value))} className={CONTROL}><option value={30}>30</option><option value={50}>50</option><option value={100}>100</option><option value="all">Show all samples</option></select></label></div><p className="mt-1 text-xs text-zinc-500">Top significant genes, row z-scores for display. {heatmapSampleLimit === "all" ? "Showing all samples in both groups." : `Showing up to ${heatmapSampleLimit} samples per group.`} Blue indicates lower and red higher relative expression within each gene.</p><Heatmap result={activeResult} maxPerGroup={heatmapSampleLimit} /></section>
         <section><h3 className="font-medium text-zinc-800">Significant differentially expressed genes</h3><p className="mt-1 text-xs text-zinc-500">Welch’s t-test with Benjamini–Hochberg adjustment. Only genes with adjusted p-value ≤ 0.05 are included. Mean difference is Comparison minus Reference on the input expression scale.</p><GeneResults genes={activeResult.genes} /></section>
+        <GoEnrichment queries={activeResult.go_queries} />
       </div>}
     </CohortShell>
   );

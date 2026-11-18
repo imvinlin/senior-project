@@ -51,7 +51,7 @@ export function FilterFacetGroup({
   picked: string[];
   onToggle: (value: string) => void;
 }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(picked.length === 0);
   const [showAll, setShowAll] = useState(false);
   // why: a picked value with 0 samples left is gone from counts, but it still needs a row to uncheck it
   const gone: [string, number][] = picked.filter((v) => !Object.hasOwn(counts, v)).map((v) => [v, 0]);

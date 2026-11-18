@@ -17,7 +17,8 @@ from pydantic import BaseModel, ConfigDict
 from cancerlike.pca import pca as decompose
 
 DATA_DIR = Path(
-    os.environ.get("CANCERLIKE_DATA_DIR", str(Path(__file__).resolve().parents[2] / "data"))
+    os.environ.get("CANCERLIKE_DATA_DIR", str(
+        Path(__file__).resolve().parents[2] / "data"))
 )
 METADATA = DATA_DIR / "raw/Paipu_deduplicated_metadata.tsv"
 DERIVED = DATA_DIR / "derived"
@@ -37,13 +38,13 @@ MIN_FIT = 10
 PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
+    "clade": "clade",
     "system": "paipu_cancer_system",
     "cancer": "paipu_cancer_type_final",
     "subtype": "paipu_cancer_type",
     "tissue": "paipu_tissue_final",
     "sex": "paipu_sex_final",
     "assay": "single_bulk",
-    "clade": "clade",
 }
 SEX_LABEL_CONFIDENCE = "paipu_sex_confidence"
 
@@ -150,14 +151,12 @@ class DifferentialExpressionResponse(BaseModel):
     cohort2_n: int
     genes: list[dict[str, str | float | None]]
     heatmap_genes: list[str]
-    heatmap_samples: list[str]
-    heatmap_values: list[list[float | None]]
-    heatmap_groups: list[str]
     all_heatmap_samples: list[str]
     all_heatmap_values: list[list[float | None]]
     all_heatmap_groups: list[str]
     pca: list[dict[str, str | float]]
     pca_variance: list[float]
+    go_queries: dict[str, list[str]]
 
 
 @asynccontextmanager
@@ -179,7 +178,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         placed = POINTS.drop_nulls("pc1")
         low = placed.select(pl.col(PCS).min()).row(0)
         high = placed.select(pl.col(PCS).max()).row(0)
-        EXTENT = {pc: [round(a, 2), round(b, 2)] for pc, a, b in zip(PCS, low, high, strict=True)}
+        EXTENT = {pc: [round(a, 2), round(b, 2)]
+                  for pc, a, b in zip(PCS, low, high, strict=True)}
         TOP = {facet: leading(placed, facet) for facet in FACET_COLUMNS}
         weights = pl.read_parquet(DERIVED / "loadings.parquet")
         LOADINGS = {pc: extremes(weights, pc) for pc in PCS}
@@ -193,7 +193,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         SINGLE_CELL_EXPRESSION = np.load(
             DERIVED / "single_cell_expression.npy", mmap_mode="r"
         )
-        ids = pl.read_parquet(DERIVED / "single_cell_samples.parquet")["run_accession"]
+        ids = pl.read_parquet(
+            DERIVED / "single_cell_samples.parquet")["run_accession"]
         SINGLE_CELL_COLUMN = {sample: i for i, sample in enumerate(ids)}
     yield
 
@@ -241,7 +242,8 @@ def assay_data(assay: Literal["bulk", "single-cell"]):
     return EXPRESSION, COLUMN
 
 
-FILTER_FACET_COLUMNS = {key: value for key, value in FACET_COLUMNS.items() if key != "assay"}
+FILTER_FACET_COLUMNS = {key: value for key,
+                        value in FACET_COLUMNS.items() if key != "assay"}
 
 
 def tally(column: str, keep: pl.Series) -> dict[str, int]:
@@ -263,12 +265,14 @@ def by_size(cells: pl.DataFrame, axis: str) -> list[str]:
 
 
 def leading(placed: pl.DataFrame, facet: str) -> list[str]:
-    counts = placed[facet].value_counts().sort("count", facet, descending=[True, False])
+    counts = placed[facet].value_counts().sort(
+        "count", facet, descending=[True, False])
     return counts[facet].head(3).to_list()
 
 
 def extremes(loadings: pl.DataFrame, pc: str, n: int = 20) -> dict[str, list[GeneWeight]]:
-    ranked = loadings.select("gene", weight=pl.col(pc).cast(pl.Float64).round(4)).sort("weight")
+    ranked = loadings.select("gene", weight=pl.col(
+        pc).cast(pl.Float64).round(4)).sort("weight")
     return {
         "high": [GeneWeight(**row) for row in ranked.tail(n).reverse().to_dicts()],
         "low": [GeneWeight(**row) for row in ranked.head(n).to_dicts()],
@@ -319,8 +323,10 @@ def differential_expression_sample_ids(
 def differential_expression_cohorts(
     request: DifferentialExpressionRequest,
 ) -> dict[str, int | bool]:
-    ids1 = set(differential_expression_sample_ids(request.cohort1, request.assay))
-    ids2 = set(differential_expression_sample_ids(request.cohort2, request.assay))
+    ids1 = set(differential_expression_sample_ids(
+        request.cohort1, request.assay))
+    ids2 = set(differential_expression_sample_ids(
+        request.cohort2, request.assay))
     return {
         "cohort1_n": len(ids1),
         "cohort2_n": len(ids2),
@@ -356,7 +362,8 @@ def differential_expression(
             ),
         )
     if request.top_genes < 1 or request.top_genes > 200:
-        raise HTTPException(status_code=422, detail="top_genes must be between 1 and 200")
+        raise HTTPException(
+            status_code=422, detail="top_genes must be between 1 and 200")
     try:
         import pandas as pd
 
@@ -364,20 +371,18 @@ def differential_expression(
 
         sample_ids = ids1 + ids2
         expression = pd.DataFrame(
-            expression_matrix[:, [expression_columns[sample] for sample in sample_ids]],
+            expression_matrix[:, [expression_columns[sample]
+                                  for sample in sample_ids]],
             index=GENES,
             columns=sample_ids,
         )
         cohort1_ids = set(ids1)
-        labels = ["Reference" if sample in cohort1_ids else "Comparison" for sample in sample_ids]
+        labels = [
+            "Reference" if sample in cohort1_ids else "Comparison" for sample in sample_ids]
         label_series = pd.Series(labels, index=sample_ids)
         results = diff_exp(expression, label_series, "Reference", "Comparison")
         significant = results.loc[results["padj"] <= 0.05].copy()
         metadata = pd.DataFrame({"cohort": label_series}, index=sample_ids)
-        heatmap, groups = generate_heatmap_df(
-            expression, metadata, "cohort", significant, top_n=request.top_genes,
-            max_samples_per_group=25, groups_to_include=["Reference", "Comparison"],
-        )
         all_heatmap, all_groups = generate_heatmap_df(
             expression,
             metadata,
@@ -424,36 +429,41 @@ def differential_expression(
     ]
     clean_genes = [
         {
-            key: value if key == "gene" else float(value) if np.isfinite(value) else None
+            key: value if key == "gene" else float(
+                value) if np.isfinite(value) else None
             for key, value in row.items()
         }
-        for row in results.to_dict(orient="records")
+        for row in significant.to_dict(orient="records")
     ]
-    heatmap_values = [
-        [float(value) if np.isfinite(value) else None for value in row]
-        for row in heatmap.to_numpy(dtype=float)
-    ]
+    go_queries = {
+        "Upregulated in Comparison": significant.loc[
+            significant["mean_difference"] > 0, "gene"
+        ].astype(str).drop_duplicates().tolist(),
+        "Downregulated in Comparison": significant.loc[
+            significant["mean_difference"] < 0, "gene"
+        ].astype(str).drop_duplicates().tolist(),
+    }
     all_heatmap_values = [
         [float(value) if np.isfinite(value) else None for value in row]
         for row in all_heatmap.to_numpy(dtype=float)
     ]
     return DifferentialExpressionResponse(
         cohort1_n=len(ids1), cohort2_n=len(ids2), genes=clean_genes,
-        heatmap_genes=heatmap.index.astype(str).tolist(),
-        heatmap_samples=heatmap.columns.astype(str).tolist(),
-        heatmap_values=heatmap_values,
-        heatmap_groups=groups.tolist(), pca=pca_points,
+        heatmap_genes=all_heatmap.index.astype(str).tolist(),
         all_heatmap_samples=all_heatmap.columns.astype(str).tolist(),
         all_heatmap_values=all_heatmap_values,
         all_heatmap_groups=all_groups.tolist(),
+        pca=pca_points,
         pca_variance=[float(value) for value in pca_ratio],
+        go_queries=go_queries,
     )
 
 
 @app.get("/api/coverage")
 def coverage(filters: Annotated[CohortFilter, Query()]) -> Coverage:
     keep = matching(filters.model_copy(update={"species": [], "cancer": []}))
-    axes = {name: SAMPLES[FACET_COLUMNS[name]] for name in ("species", "cancer")}
+    axes = {name: SAMPLES[FACET_COLUMNS[name]]
+            for name in ("species", "cancer")}
     cells = (
         pl.DataFrame({**axes, "keep": keep})
         .group_by("species", "cancer")
@@ -470,13 +480,15 @@ def coverage(filters: Annotated[CohortFilter, Query()]) -> Coverage:
 @app.get("/api/pca")
 def pca(filters: Annotated[CohortFilter, Query()]) -> PcaView:
     if POINTS is None:
-        raise HTTPException(status_code=503, detail="no pca coordinates, run make prep first")
+        raise HTTPException(
+            status_code=503, detail="no pca coordinates, run make prep first")
     if filters.assay == "single-cell":
         return single_cell_pca_view(filters, fit="global")
     rows = POINTS.filter(matching(filters))
     placed = rows.drop_nulls("pc1")
     fields = list(PcaPoint.model_fields)
-    rounded = placed.select(fields).with_columns(pl.col(PCS).cast(pl.Float64).round(2))
+    rounded = placed.select(fields).with_columns(
+        pl.col(PCS).cast(pl.Float64).round(2))
     return PcaView(
         points=[PcaPoint(**point) for point in rounded.to_dicts()],
         variance=VARIANCE,
@@ -492,7 +504,8 @@ def pca_cohort(filters: Annotated[CohortFilter, Query()]) -> PcaView:
     if filters.assay == "single-cell":
         return single_cell_pca_view(filters, fit="cohort")
     if EXPRESSION is None or POINTS is None:
-        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+        raise HTTPException(
+            status_code=503, detail="no expression matrix, run make prep first")
     rows = POINTS.filter(matching(filters))
     placed = rows.drop_nulls("pc1")
     if placed.height < MIN_FIT:
@@ -500,19 +513,22 @@ def pca_cohort(filters: Annotated[CohortFilter, Query()]) -> PcaView:
             status_code=422,
             detail=f"{placed.height} bulk samples is too few to decompose, {MIN_FIT} needed",
         )
-    matrix = EXPRESSION[:, [COLUMN[s] for s in placed["run_accession"]]].T.astype(np.float64)
+    matrix = EXPRESSION[:, [COLUMN[s]
+                            for s in placed["run_accession"]]].T.astype(np.float64)
     coords, weights, ratio = decompose(matrix, len(PCS))
     refit = placed.with_columns(
         **{pc: pl.Series(coords[:, i]).round(2) for i, pc in enumerate(PCS)}
     )
-    loadings = pl.DataFrame({"gene": GENES, **{pc: weights[:, i] for i, pc in enumerate(PCS)}})
+    loadings = pl.DataFrame(
+        {"gene": GENES, **{pc: weights[:, i] for i, pc in enumerate(PCS)}})
     return PcaView(
         points=[
             PcaPoint(**point) for point in refit.select(list(PcaPoint.model_fields)).to_dicts()
         ],
         variance=[round(float(r), 4) for r in ratio],
         extent={
-            pc: [round(float(coords[:, i].min()), 2), round(float(coords[:, i].max()), 2)]
+            pc: [round(float(coords[:, i].min()), 2),
+                 round(float(coords[:, i].max()), 2)]
             for i, pc in enumerate(PCS)
         },
         top=TOP,
@@ -553,9 +569,11 @@ def single_cell_pca_view(filters: CohortFilter, fit: Literal["global", "cohort"]
     for sample in selected_ids:
         point = dict(metadata[sample])
         point.update(
-            {pc: round(float(coords[selected_indices[sample], i]), 2) for i, pc in enumerate(PCS)}
+            {pc: round(float(coords[selected_indices[sample], i]), 2)
+             for i, pc in enumerate(PCS)}
         )
-        points.append(PcaPoint(**{field: point[field] for field in PcaPoint.model_fields}))
+        points.append(
+            PcaPoint(**{field: point[field] for field in PcaPoint.model_fields}))
     loading_frame = pl.DataFrame(
         {"gene": GENES, **{pc: weights[:, i] for i, pc in enumerate(PCS)}}
     )
@@ -564,7 +582,8 @@ def single_cell_pca_view(filters: CohortFilter, fit: Literal["global", "cohort"]
         points=points,
         variance=[round(float(value), 4) for value in ratio],
         extent={
-            pc: [round(float(coords[:, i].min()), 2), round(float(coords[:, i].max()), 2)]
+            pc: [round(float(coords[:, i].min()), 2),
+                 round(float(coords[:, i].max()), 2)]
             for i, pc in enumerate(PCS)
         },
         top={facet: leading(top_rows, facet) for facet in FACET_COLUMNS},
@@ -572,17 +591,21 @@ def single_cell_pca_view(filters: CohortFilter, fit: Literal["global", "cohort"]
         fit=fit,
         loadings={pc: extremes(loading_frame, pc) for pc in PCS},
     )
+
+
 @app.get("/api/loadings")
 def loadings() -> dict[str, dict[str, list[GeneWeight]]]:
     if not LOADINGS:
-        raise HTTPException(status_code=503, detail="no loadings, run make prep first")
+        raise HTTPException(
+            status_code=503, detail="no loadings, run make prep first")
     return LOADINGS
 
 
 @app.get("/api/genes")
 def search_genes(q: str = "", limit: int = 50) -> list[str]:
     if EXPRESSION is None:
-        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+        raise HTTPException(
+            status_code=503, detail="no expression matrix, run make prep first")
     query = q.casefold().strip()
     matches = [gene for gene in GENES if query in gene.casefold()]
     return matches[: max(1, min(limit, 50))]
@@ -604,7 +627,8 @@ def gene_expression(
 ) -> GeneExpressionView:
     expression_matrix, expression_columns = assay_data(assay)
     if expression_matrix is None:
-        raise HTTPException(status_code=503, detail="no expression matrix, run make prep first")
+        raise HTTPException(
+            status_code=503, detail="no expression matrix, run make prep first")
     if gene1 not in GENE_INDEX or gene2 not in GENE_INDEX:
         raise HTTPException(status_code=404, detail="gene not found")
     filters = CohortFilter(
@@ -622,9 +646,11 @@ def expression_view(
     expression_matrix: NDArray[np.float32],
     expression_columns: dict[str, int],
 ) -> GeneExpressionView:
-    selected_filters = filters if scope == "cohort" else CohortFilter(assay=filters.assay)
+    selected_filters = filters if scope == "cohort" else CohortFilter(
+        assay=filters.assay)
     selected = SAMPLES.filter(matching(selected_filters))
-    selected_profiles = selected.filter(pl.col("run_accession").is_in(expression_columns))
+    selected_profiles = selected.filter(
+        pl.col("run_accession").is_in(expression_columns))
     samples = selected_profiles.select(
         "run_accession", "bioproject", *FACET_COLUMNS.values()
     ).to_dicts()
@@ -634,8 +660,10 @@ def expression_view(
             run_accession=row["run_accession"],
             study=row["bioproject"],
             **{facet: row[column] for facet, column in FACET_COLUMNS.items()},
-            x=float(expression_matrix[x_index, expression_columns[row["run_accession"]]]),
-            y=float(expression_matrix[y_index, expression_columns[row["run_accession"]]]),
+            x=float(expression_matrix[x_index,
+                    expression_columns[row["run_accession"]]]),
+            y=float(expression_matrix[y_index,
+                    expression_columns[row["run_accession"]]]),
         )
         for row in samples
     ]
