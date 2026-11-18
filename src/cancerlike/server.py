@@ -38,13 +38,13 @@ MIN_FIT = 10
 PCS = ["pc1", "pc2", "pc3", "pc4", "pc5"]
 FACET_COLUMNS = {
     "species": "organism_scientific_name",
+    "clade": "clade",
     "system": "paipu_cancer_system",
     "cancer": "paipu_cancer_type_final",
     "subtype": "paipu_cancer_type",
     "tissue": "paipu_tissue_final",
     "sex": "paipu_sex_final",
     "assay": "single_bulk",
-    "clade": "clade",
 }
 SEX_LABEL_CONFIDENCE = "paipu_sex_confidence"
 
@@ -151,9 +151,6 @@ class DifferentialExpressionResponse(BaseModel):
     cohort2_n: int
     genes: list[dict[str, str | float | None]]
     heatmap_genes: list[str]
-    heatmap_samples: list[str]
-    heatmap_values: list[list[float | None]]
-    heatmap_groups: list[str]
     all_heatmap_samples: list[str]
     all_heatmap_values: list[list[float | None]]
     all_heatmap_groups: list[str]
@@ -386,10 +383,6 @@ def differential_expression(
         results = diff_exp(expression, label_series, "Reference", "Comparison")
         significant = results.loc[results["padj"] <= 0.05].copy()
         metadata = pd.DataFrame({"cohort": label_series}, index=sample_ids)
-        heatmap, groups = generate_heatmap_df(
-            expression, metadata, "cohort", significant, top_n=request.top_genes,
-            max_samples_per_group=25, groups_to_include=["Reference", "Comparison"],
-        )
         all_heatmap, all_groups = generate_heatmap_df(
             expression,
             metadata,
@@ -450,23 +443,17 @@ def differential_expression(
             significant["mean_difference"] < 0, "gene"
         ].astype(str).drop_duplicates().tolist(),
     }
-    heatmap_values = [
-        [float(value) if np.isfinite(value) else None for value in row]
-        for row in heatmap.to_numpy(dtype=float)
-    ]
     all_heatmap_values = [
         [float(value) if np.isfinite(value) else None for value in row]
         for row in all_heatmap.to_numpy(dtype=float)
     ]
     return DifferentialExpressionResponse(
         cohort1_n=len(ids1), cohort2_n=len(ids2), genes=clean_genes,
-        heatmap_genes=heatmap.index.astype(str).tolist(),
-        heatmap_samples=heatmap.columns.astype(str).tolist(),
-        heatmap_values=heatmap_values,
-        heatmap_groups=groups.tolist(), pca=pca_points,
+        heatmap_genes=all_heatmap.index.astype(str).tolist(),
         all_heatmap_samples=all_heatmap.columns.astype(str).tolist(),
         all_heatmap_values=all_heatmap_values,
         all_heatmap_groups=all_groups.tolist(),
+        pca=pca_points,
         pca_variance=[float(value) for value in pca_ratio],
         go_queries=go_queries,
     )
